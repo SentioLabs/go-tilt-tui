@@ -14,7 +14,22 @@ import (
 // turned into spaces, and other C0/C1 control characters replaced with
 // U+FFFD. Use it for names, errors, labels, URLs and paths.
 func Text(s string) string {
-	s = ansi.Strip(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for len(s) > 0 {
+		if n := stringLen(s); n > 0 {
+			s = s[n:]
+			continue
+		}
+		// Cut s before its next ESC, so no chunk holds the start of a
+		// string. ansi.Strip handles CSI and other short sequences.
+		end := len(s)
+		if i := strings.IndexByte(s[1:], 0x1b); i >= 0 {
+			end = i + 1
+		}
+		b.WriteString(ansi.Strip(s[:end]))
+		s = s[end:]
+	}
 	return strings.Map(func(r rune) rune {
 		switch {
 		case r == '\t' || r == '\n' || r == '\r':
@@ -24,7 +39,7 @@ func Text(s string) string {
 		default:
 			return r
 		}
-	}, s)
+	}, b.String())
 }
 
 // LogLine returns s with SGR (colour and style) sequences kept and every

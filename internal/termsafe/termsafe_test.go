@@ -30,6 +30,12 @@ func TestText(t *testing.T) {
 		{"BEL replaced", "a\x07b", "a�b"},
 		{"C1 CSI replaced", "a\u009b31mb", "a�31mb"},
 		{"unicode kept", "résumé ✓", "résumé ✓"},
+		{"DCS with non-ASCII payload removed", "a\x1bPé\x1b\\b", "ab"},
+		{"unterminated APC with 0x9C rune removed", "\x1b_✛31mX", ""},
+		{"OSC with CJK payload removed", "a\x1b]0;日本\x07b", "ab"},
+		{"PM with non-ASCII payload removed", "a\x1b^ü\x1b\\b", "ab"},
+		{"SOS with non-ASCII payload removed", "a\x1bXü\x1b\\b", "ab"},
+		{"text after a removed string kept", "\x1b]0;✛\x07x\x1b[1my", "xy"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -188,11 +194,36 @@ func FuzzText(f *testing.F) {
 	for _, s := range fuzzSeeds {
 		f.Add(s)
 	}
+	f.Add("a\x1bPé\x1b\\b")
+	f.Add("\x1b_✛31mX")
+	f.Add("a\x1b]0;日本\x07b")
+	f.Add("a\x1b^ü\x1b\\b")
+	f.Add("a\x1bXü\x1b\\b")
+	f.Add("\x1b]0;✛\x07x\x1b[1my")
 	f.Fuzz(func(t *testing.T, in string) {
 		out := Text(in)
 		for _, r := range out {
 			if r == 0x1b || unicode.IsControl(r) {
 				t.Fatalf("Text(%q) = %q contains control %U", in, out, r)
+			}
+		}
+	})
+}
+
+// FuzzTextDropsStrings wraps an arbitrary payload in each string
+// introducer and checks that only the text around it survives.
+func FuzzTextDropsStrings(f *testing.F) {
+	f.Add("é")
+	f.Add("✛31m")
+	f.Add("日本")
+	f.Fuzz(func(t *testing.T, payload string) {
+		if strings.ContainsAny(payload, "\x1b\x07") {
+			return
+		}
+		for _, intro := range []string{"]", "P", "_", "^", "X"} {
+			in := "a\x1b" + intro + payload + "\x1b\\b"
+			if got := Text(in); got != "ab" {
+				t.Fatalf("Text(%q) = %q, want %q", in, got, "ab")
 			}
 		}
 	})
