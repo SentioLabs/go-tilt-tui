@@ -295,9 +295,6 @@ func (s *Store) continueOpen(st *spanState, piece string, complete bool) {
 func (s *Store) startLine(spanID string, st *spanState, piece string, complete bool, level Level, progressID string, at time.Time) {
 	b := s.buffer(st.resource)
 	if i, ok := b.findProgress(spanID, progressID); ok {
-		e := &b.live()[i]
-		e.line.Time = at
-		e.line.Level = level
 		s.update(b, i, st, piece, complete)
 		return
 	}

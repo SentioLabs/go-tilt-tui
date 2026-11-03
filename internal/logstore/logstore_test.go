@@ -203,6 +203,30 @@ func TestProgressIDIgnoresOtherSpans(t *testing.T) {
 	equal(t, res(s, "api"), "a 20%", "b 50%", "noise")
 }
 
+func TestProgressKeepsTimeAndLevel(t *testing.T) {
+	s := New(Options{})
+	// view gives segment i the time Unix(1000+i), so the replacement
+	// carries a later Time and a different Level than the original.
+	s.Append(view(t, true, 0, 2, spans,
+		seg{span: "a", text: "10%\n", level: "INFO", progress: "p"},
+		seg{span: "a", text: "20%\n", level: "WARN", progress: "p"}))
+	got := res(s, "api")
+	equal(t, got, "20%")
+	l := got[0]
+	if l.Version == 0 {
+		t.Fatal("replaced line kept Version 0")
+	}
+	if l.Seq != 1 {
+		t.Fatalf("Seq = %d, want 1", l.Seq)
+	}
+	if want := time.Unix(1000, 0); !l.Time.Equal(want) {
+		t.Fatalf("Time = %v, want %v (the segment that started the line)", l.Time, want)
+	}
+	if l.Level != LevelInfo {
+		t.Fatalf("Level = %v, want LevelInfo", l.Level)
+	}
+}
+
 func TestLineCap(t *testing.T) {
 	s := New(Options{})
 	long := strings.Repeat("x", MaxLineBytes+100)
