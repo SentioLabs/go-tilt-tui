@@ -235,8 +235,14 @@ func (m *Model) showsUptime() bool {
 }
 
 // needsTick reports whether anything on screen changes with time alone.
+// It renders first, so the list reports the relative times this update
+// put on screen rather than those of the previous frame.
 func (m *Model) needsTick() bool {
-	return m.list.ShowsRelativeTime() || m.showsUptime() || m.flashActive()
+	if m.showsUptime() || m.flashActive() {
+		return true
+	}
+	m.render()
+	return m.list.ShowsRelativeTime()
 }
 
 // syncSource points the log view at the list's selection.

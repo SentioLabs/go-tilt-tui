@@ -53,7 +53,6 @@ func (m Model) render() string {
 	now := m.d.Now()
 	paneH := m.height - 1
 	var lines []string
-	lead := ""
 	if paneH > 0 {
 		switch {
 		case !m.narrow():
@@ -73,10 +72,7 @@ func (m Model) render() string {
 			m.drawOverlay(lines, o)
 		}
 	}
-	if m.narrow() && m.focus == command.FocusLogs {
-		lead = strings.Join(m.statusParts(now), "  ") + "  "
-	}
-	return strings.Join(append(lines, m.footer(lead)), "\n")
+	return strings.Join(append(lines, m.footer(now)), "\n")
 }
 
 func (m *Model) border(focused bool) lipgloss.Style {
@@ -87,11 +83,23 @@ func (m *Model) border(focused bool) lipgloss.Style {
 }
 
 // listPane is the boxed resource list with the status line in its last
-// rows. The status line wraps rather than hiding the remote marker.
+// rows. The status line wraps rather than hiding the remote marker. When
+// the pane is too short for every status row, the last row, which holds
+// the marker, stays.
 func (m *Model) listPane(w, h int, focused bool, now time.Time) []string {
 	innerW, innerH := max(0, w-2), max(0, h-2)
-	status := wrapParts(m.statusParts(now), innerW)
-	status = status[:min(len(status), innerH)]
+	parts := m.statusParts(now, innerW)
+	if m.d.Remote {
+		parts = append(parts, m.remoteMarker())
+	}
+	status := wrapParts(parts, innerW)
+	if n := len(status); n > innerH {
+		last := status[n-1]
+		status = status[:innerH]
+		if innerH > 0 {
+			status[innerH-1] = last
+		}
+	}
 	var body []string
 	if listH := innerH - len(status); listH > 0 {
 		body = strings.Split(m.list.View(innerW, listH, focused, now), "\n")
@@ -132,9 +140,10 @@ func (m *Model) logPane(w, h int, focused bool) []string {
 	return strings.Split(box(strings.Join(parts, "  "), body, w, h, m.border(focused)), "\n")
 }
 
-// statusParts is the connection state, the address, the Tilt uptime when
-// live, and the remote marker when --allow-remote is set.
-func (m *Model) statusParts(now time.Time) []string {
+// statusParts is the connection state, the address and the Tilt uptime
+// when live. The connection error is cut to errW cells, or left out when
+// errW is not positive.
+func (m *Model) statusParts(now time.Time, errW int) []string {
 	th := m.d.Theme
 	var conn string
 	switch m.conn {
@@ -144,8 +153,8 @@ func (m *Model) statusParts(now time.Time) []string {
 		conn = th.Status[tilt.StatusHealthy].Render("● live")
 	case connDown:
 		text := "● disconnected"
-		if m.connErr != nil {
-			text += ": " + termsafe.Text(m.connErr.Error())
+		if m.connErr != nil && errW > 0 {
+			text += ": " + ansi.Truncate(termsafe.Text(m.connErr.Error()), errW, "…")
 		}
 		conn = th.Status[tilt.StatusUnhealthy].Render(text)
 	}
@@ -153,10 +162,12 @@ func (m *Model) statusParts(now time.Time) []string {
 	if m.showsUptime() {
 		parts = append(parts, uptime(now.Sub(m.startTime)))
 	}
-	if m.d.Remote {
-		parts = append(parts, th.Warning.Render("⚠ unencrypted remote"))
-	}
 	return parts
+}
+
+// remoteMarker is shown for as long as --allow-remote is set.
+func (m *Model) remoteMarker() string {
+	return m.d.Theme.Warning.Render("⚠ unencrypted remote")
 }
 
 // wrapParts joins parts with two spaces, starting a new row when the next
@@ -198,13 +209,39 @@ func uptime(d time.Duration) string {
 	}
 }
 
-// footer is lead, then the flash while it lasts, else the key hints.
-func (m *Model) footer(lead string) string {
+// footer is the flash while it lasts, else the key hints. The narrow log
+// pane has no status line of its own, so the status leads its footer.
+func (m *Model) footer(now time.Time) string {
 	text := m.d.Theme.Dim.Render(m.hints())
 	if m.flashActive() {
 		text = termsafe.Text(m.flash)
 	}
+	lead := ""
+	if m.narrow() && m.focus == command.FocusLogs {
+		lead = m.footerStatus(now, m.width-1-ansi.StringWidth(text))
+	}
 	return ansi.Truncate(" "+lead+text, m.width, "…")
+}
+
+// footerStatus is the status line for the footer in at most w cells, with
+// two trailing spaces. The remote marker comes first, so it is the last
+// thing cut. The connection error gets only the cells left over, so it
+// can't push the marker or the hints off screen.
+func (m *Model) footerStatus(now time.Time, w int) string {
+	lead := ""
+	if m.d.Remote {
+		lead = m.remoteMarker() + "  "
+		w -= ansi.StringWidth(lead)
+	}
+	parts := m.statusParts(now, 0)
+	errW := w - ansi.StringWidth(strings.Join(parts, "  ")) - len("  ") - len(": ")
+	if errW > 0 {
+		parts = m.statusParts(now, errW)
+	}
+	if w > len("  ") {
+		lead += ansi.Truncate(strings.Join(parts, "  "), w-len("  "), "…") + "  "
+	}
+	return lead
 }
 
 func (m *Model) hints() string {

@@ -453,3 +453,71 @@ func TestOlderFlashDoesNotReplaceNewer(t *testing.T) {
 		t.Fatalf("a stale flash replaced a newer one:\n%s", s)
 	}
 }
+
+// checkFrame fails unless the frame is exactly h rows of at most w cells.
+func checkFrame(t *testing.T, m Model, w, h int) {
+	t.Helper()
+	lines := strings.Split(screen(m), "\n")
+	if len(lines) != h {
+		t.Errorf("%dx%d: %d lines", w, h, len(lines))
+	}
+	for i, l := range lines {
+		if lw := ansi.StringWidth(l); lw > w {
+			t.Errorf("%dx%d: line %d is %d wide", w, h, i, lw)
+		}
+	}
+}
+
+func TestNarrowLogFooterKeepsMarkerAndQuit(t *testing.T) {
+	m, _ := setup(t, 80, 20, Deps{Remote: true})
+	m = press(m, "enter")
+	m, _ = send(m, ConnMsg{Err: errors.New("get websocket token: " + strings.Repeat("x", 179))})
+	lines := strings.Split(screen(m), "\n")
+	footer := lines[len(lines)-1]
+	for _, want := range []string{"⚠ unencrypted remote", "q quit", "● disconnected"} {
+		if !strings.Contains(footer, want) {
+			t.Errorf("footer lacks %q: %q", want, footer)
+		}
+	}
+	checkFrame(t, m, 80, 20)
+}
+
+func TestListPaneKeepsMarkerWhenShort(t *testing.T) {
+	for _, size := range [][2]int{{140, 4}, {80, 4}, {80, 5}} {
+		m, _ := setup(t, size[0], size[1], Deps{Remote: true})
+		m, _ = send(m, ConnMsg{Err: errors.New("dial tcp: connection refused")})
+		if s := screen(m); !strings.Contains(s, "⚠ unencrypted remote") {
+			t.Errorf("%dx%d: marker dropped:\n%s", size[0], size[1], s)
+		}
+		checkFrame(t, m, size[0], size[1])
+	}
+}
+
+func TestTickStartsWhenViewBringsRelativeTimes(t *testing.T) {
+	m, _ := newModel(t, Deps{})
+	m, _ = send(m, tea.WindowSizeMsg{Width: 140, Height: 20})
+	m, _ = send(m, ConnMsg{Connecting: true})
+	v := snapshot(t, true)
+	v.TiltStartTime = time.Time{}
+	if _, cmd := m.Update(v); cmd == nil {
+		t.Fatal("no tick after a view put build times on screen")
+	}
+}
+
+func TestFeatureHandledStopsHandling(t *testing.T) {
+	saved := features
+	t.Cleanup(func() { features = saved })
+	register(Feature{
+		Name: "eats-j",
+		Update: func(_ *Model, msg tea.Msg) (tea.Cmd, bool) {
+			k, ok := msg.(tea.KeyPressMsg)
+			return nil, ok && k.String() == "j"
+		},
+	})
+	m, _ := setup(t, 140, 20, Deps{})
+	before := m.list.Selected()
+	m = press(m, "j", "j")
+	if m.list.Selected() != before {
+		t.Fatal("a key a feature handled still moved the list")
+	}
+}
