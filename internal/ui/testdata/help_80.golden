@@ -1,0 +1,30 @@
+╭─ Resources  ✗ 1  ✓ 2/3 ──────────────────────────────────────────────────────╮
+│All Resources                                                                 │
+│▼ backend (1)                                                                 │
+│  ●  api                                                       11m ago · 11.4s│
+│▼ frontend (1)     ╭─ Help ───────────────────────────────╮                   │
+│  ●  web           │Global                                │                   │
+│▼ ungrouped (1)    │  q                quit               │                   │
+│  ●  (Tiltfile)    │  tab              switch pane        │                   │
+│                   │  ?                help               │                   │
+│                   │                                      │                   │
+│                   │Resource list                         │                   │
+│                   │  enter            open logs          │                   │
+│                   │  j/k              move               │                   │
+│                   │  g/G              first/last         │                   │
+│                   │  e/c              expand/collapse all│                   │
+│                   │  d                show/hide disabled │                   │
+│                   │                                      │                   │
+│                   │Logs                                  │                   │
+│                   │  esc              back to list       │                   │
+│                   │  j/k/pgup/pgdown  scroll             │                   │
+│                   │  g/G              top/bottom         │                   │
+│                   │  s                follow on/off      │                   │
+│                   │  t                timestamps on/off  │                   │
+│                   ╰──────────────────────────────────────╯                   │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│● live  localhost:10350  13m 21s                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ r trigger · tab switch · ? help · q quit

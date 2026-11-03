@@ -4,16 +4,30 @@ package ui
 
 import (
 	"context"
-	"fmt"
-	"strings"
+	"slices"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sentiolabs/go-tilt-tui/internal/logstore"
 	"github.com/sentiolabs/go-tilt-tui/internal/termsafe"
 	"github.com/sentiolabs/go-tilt-tui/internal/tilt"
+	"github.com/sentiolabs/go-tilt-tui/internal/ui/command"
+	"github.com/sentiolabs/go-tilt-tui/internal/ui/logview"
+	"github.com/sentiolabs/go-tilt-tui/internal/ui/overlay"
+	"github.com/sentiolabs/go-tilt-tui/internal/ui/resourcelist"
+	"github.com/sentiolabs/go-tilt-tui/internal/ui/theme"
+)
+
+const (
+	// flashFor is how long a footer message stays up.
+	flashFor = 3 * time.Second
+	// startupFlashFor is how long Deps.Flash stays up.
+	startupFlashFor = 10 * time.Second
+	// tickEvery refreshes relative times, the uptime and flash expiry.
+	tickEvery = time.Second
+
+	allResourcesTitle = "All Resources"
 )
 
 // Messages sent into the program from the watch goroutine.
@@ -28,14 +42,33 @@ type (
 	}
 )
 
-type triggerDoneMsg struct {
-	name string
-	err  error
+// Private messages that commands and ticks send back to Update.
+type (
+	// flashMsg shows text in the footer. at orders flashes that race each
+	// other, such as a trigger's start and its result.
+	flashMsg struct {
+		text string
+		at   time.Time
+	}
+	switchPaneMsg struct{}
+	showPaneMsg   struct{ focus command.Focus }
+	tickMsg       time.Time
+)
+
+// Client is the slice of tilt.Client the UI needs. Tests fake it.
+type Client interface {
+	Trigger(ctx context.Context, name string) error
 }
 
-// Triggerer is the slice of tilt.Client the UI needs. Tests can fake it.
-type Triggerer interface {
-	Trigger(ctx context.Context, name string) error
+type Deps struct {
+	Client  Client
+	Addr    string
+	Theme   theme.Theme
+	Logs    *logstore.Store
+	Filters []string         // active saved-filter names, shown in the log title
+	Remote  bool             // --allow-remote: show "⚠ unencrypted remote"
+	Flash   string           // startup warnings
+	Now     func() time.Time // nil means time.Now
 }
 
 type connState int
@@ -47,35 +80,80 @@ const (
 )
 
 type Model struct {
-	client Triggerer
-	addr   string
-	store  *tilt.Store
+	d        Deps
+	store    *tilt.Store
+	list     *resourcelist.Model
+	logs     *logview.Model
+	overlays []overlay.Overlay
 
-	rows   []tilt.Resource
-	cursor int // index into rows
-	offset int // first visible row
+	focus     command.Focus
+	width     int
+	height    int
+	conn      connState
+	connErr   error
+	startTime time.Time // from View.TiltStartTime
+	snapshots int       // complete snapshots seen
 
-	conn    connState
-	connErr error
-	flash   string
-
-	width, height int
+	flash      string
+	flashAt    time.Time // when the shown flash was issued
+	flashUntil time.Time
+	ticking    bool
 }
 
-func New(client Triggerer, addr string) Model {
-	return Model{client: client, addr: addr, store: tilt.NewStore()}
+func New(d Deps) Model {
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	m := Model{
+		d:     d,
+		store: tilt.NewStore(),
+		list:  resourcelist.New(d.Theme),
+		logs:  logview.New(d.Logs, d.Theme),
+	}
+	if d.Flash != "" {
+		m.setFlash(d.Flash, d.Now(), startupFlashFor)
+	}
+	m.syncSource()
+	return m
 }
 
 func (m Model) Init() tea.Cmd { return nil }
 
+// Update offers msg to every feature, then handles it, then points the log
+// view at the list's selection and starts the tick if one is due.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+	handled := false
+	for _, f := range features {
+		if f.Update == nil {
+			continue
+		}
+		cmd, h := f.Update(&m, msg)
+		cmds = append(cmds, cmd)
+		if h {
+			handled = true
+			break
+		}
+	}
+	if !handled {
+		var cmd tea.Cmd
+		m, cmd = m.handle(msg)
+		cmds = append(cmds, cmd)
+	}
+	m.syncSource()
+	if !m.ticking && m.needsTick() {
+		m.ticking = true
+		cmds = append(cmds, tea.Tick(tickEvery, func(t time.Time) tea.Msg { return tickMsg(t) }))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m Model) handle(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.clampScroll()
 
 	case ViewMsg:
-		m.conn, m.connErr = connLive, nil
 		m.applyView(tilt.View(msg))
 
 	case ConnMsg:
@@ -85,189 +163,99 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.conn, m.connErr = connDown, msg.Err
 		}
 
-	case triggerDoneMsg:
-		if msg.err != nil {
-			m.flash = "trigger failed: " + msg.err.Error()
-		} else {
-			m.flash = "triggered " + msg.name
-		}
-
 	case tea.KeyPressMsg:
-		return m.handleKey(msg)
+		return m.routeKey(msg)
+
+	case tea.MouseWheelMsg:
+		m.logs.HandleMouse(msg)
+
+	case PushOverlayMsg:
+		if msg.Overlay != nil {
+			m.overlays = append(slices.Clip(m.overlays), msg.Overlay)
+		}
+
+	case overlay.CloseMsg:
+		if n := len(m.overlays); n > 0 {
+			m.overlays = m.overlays[:n-1]
+		}
+
+	case flashMsg:
+		m.setFlash(msg.text, msg.at, flashFor)
+
+	case switchPaneMsg:
+		if m.focus == command.FocusList {
+			m.focus = command.FocusLogs
+		} else {
+			m.focus = command.FocusList
+		}
+
+	case showPaneMsg:
+		m.focus = msg.focus
+
+	case tickMsg:
+		m.ticking = false
+		if m.flash != "" && !m.flashActive() {
+			m.flash = ""
+		}
 	}
 	return m, nil
 }
 
-// applyView merges an update while keeping the cursor on the same resource
-// name, so rows moving around under the user don't change their selection.
 func (m *Model) applyView(v tilt.View) {
-	selected := m.selectedName()
+	m.conn, m.connErr = connLive, nil
 	m.store.Apply(v)
-	m.rows = m.store.Resources()
-	m.cursor = 0
-	for i, r := range m.rows {
-		if r.Name() == selected {
-			m.cursor = i
-			break
+	m.d.Logs.Append(v)
+	m.list.SetResources(m.store.Resources())
+	if !v.TiltStartTime.IsZero() {
+		m.startTime = v.TiltStartTime
+	}
+	if v.IsComplete {
+		m.snapshots++
+		if m.snapshots > 1 {
+			m.setFlash("reconnected · logs reloaded", m.d.Now(), flashFor)
 		}
 	}
-	m.clampScroll()
 }
 
-func (m Model) selectedName() string {
-	if m.cursor < len(m.rows) {
-		return m.rows[m.cursor].Name()
+// setFlash shows text until at+d. A flash issued before the one on screen
+// is dropped, so a slow message can't hide a newer one.
+func (m *Model) setFlash(text string, at time.Time, d time.Duration) {
+	if at.Before(m.flashAt) {
+		return
 	}
-	return ""
+	m.flash, m.flashAt, m.flashUntil = text, at, at.Add(d)
 }
 
-func (m Model) handleKey(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	switch k.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.rows)-1 {
-			m.cursor++
-		}
-	case "g", "home":
-		m.cursor = 0
-	case "G", "end":
-		m.cursor = max(len(m.rows)-1, 0)
-	case "r", "enter":
-		if name := m.selectedName(); name != "" {
-			m.flash = "triggering " + name + "…"
-			return m, m.trigger(name)
-		}
-	}
-	m.clampScroll()
-	return m, nil
+func (m *Model) flashActive() bool {
+	return m.flash != "" && m.d.Now().Before(m.flashUntil)
 }
 
-func (m Model) trigger(name string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		return triggerDoneMsg{name: name, err: m.client.Trigger(ctx, name)}
-	}
+func (m *Model) showsUptime() bool {
+	return m.conn == connLive && !m.startTime.IsZero()
 }
 
-// listHeight is the number of rows available for resources.
-func (m Model) listHeight() int {
-	return max(m.height-3, 1) // header, blank line, footer
+// needsTick reports whether anything on screen changes with time alone.
+func (m *Model) needsTick() bool {
+	return m.list.ShowsRelativeTime() || m.showsUptime() || m.flashActive()
 }
 
-func (m *Model) clampScroll() {
-	h := m.listHeight()
-	if m.cursor < m.offset {
-		m.offset = m.cursor
+// syncSource points the log view at the list's selection.
+func (m *Model) syncSource() {
+	sel := m.list.Selected()
+	if sel == m.logs.Source() {
+		return
 	}
-	if m.cursor >= m.offset+h {
-		m.offset = m.cursor - h + 1
+	title := allResourcesTitle
+	if !sel.All {
+		title = termsafe.Text(sel.Resource)
 	}
-	m.offset = max(min(m.offset, len(m.rows)-h), 0)
+	m.logs.SetSource(sel, title)
 }
-
-var (
-	styleTitle   = lipgloss.NewStyle().Bold(true)
-	styleDim     = lipgloss.NewStyle().Faint(true)
-	styleCursor  = lipgloss.NewStyle().Reverse(true)
-	styleErrText = lipgloss.NewStyle().Foreground(lipgloss.Red)
-
-	statusDot = map[tilt.Status]lipgloss.Style{
-		tilt.StatusNone:      lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
-		tilt.StatusPending:   lipgloss.NewStyle().Foreground(lipgloss.Yellow),
-		tilt.StatusBuilding:  lipgloss.NewStyle().Foreground(lipgloss.Blue),
-		tilt.StatusHealthy:   lipgloss.NewStyle().Foreground(lipgloss.Green),
-		tilt.StatusUnhealthy: lipgloss.NewStyle().Foreground(lipgloss.Red),
-		tilt.StatusDisabled:  lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
-	}
-)
 
 func (m Model) View() tea.View {
 	v := tea.NewView(m.render())
 	v.AltScreen = true
-	v.WindowTitle = "tilt-tui " + m.addr
+	v.MouseMode = tea.MouseModeCellMotion
+	v.WindowTitle = "tilt-tui " + termsafe.Text(m.d.Addr)
 	return v
-}
-
-func (m Model) render() string {
-	if m.width == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString(m.header())
-	b.WriteString("\n\n")
-
-	nameW := 12
-	for _, r := range m.rows {
-		nameW = max(nameW, ansi.StringWidth(termsafe.Text(r.Name())))
-	}
-	nameW = min(nameW, m.width/2)
-
-	h := m.listHeight()
-	lines := make([]string, 0, h)
-	if len(m.rows) == 0 {
-		lines = append(lines, styleDim.Render("  no resources yet"))
-	}
-	for i := m.offset; i < min(m.offset+h, len(m.rows)); i++ {
-		r := m.rows[i]
-		st := r.Combined()
-		line := fmt.Sprintf(" %s %-*s  %-8s  %-8s  %s",
-			statusDot[st].Render("●"),
-			nameW, ansi.Truncate(termsafe.Text(r.Name()), nameW, "…"),
-			termsafe.Text(r.Kind()),
-			st,
-			termsafe.Text(firstLine(r.LastBuildError())),
-		)
-		line = ansi.Truncate(line, m.width, "…")
-		if i == m.cursor {
-			// Pad so the highlight spans the full width.
-			line = styleCursor.Render(line + strings.Repeat(" ", max(m.width-ansi.StringWidth(line), 0)))
-		}
-		lines = append(lines, line)
-	}
-	for len(lines) < h {
-		lines = append(lines, "")
-	}
-	b.WriteString(strings.Join(lines, "\n"))
-	b.WriteString("\n")
-	b.WriteString(m.footer())
-	return b.String()
-}
-
-func (m Model) header() string {
-	var conn string
-	switch m.conn {
-	case connConnecting:
-		conn = statusDot[tilt.StatusPending].Render("● connecting")
-	case connLive:
-		conn = statusDot[tilt.StatusHealthy].Render("● live")
-	case connDown:
-		conn = statusDot[tilt.StatusUnhealthy].Render("● disconnected")
-		if m.connErr != nil {
-			conn += " " + styleErrText.Render(termsafe.Text(m.connErr.Error()))
-		}
-	}
-	h := fmt.Sprintf("%s  %s  %s", styleTitle.Render("tilt-tui"), styleDim.Render(m.addr), conn)
-	if tf := m.store.TiltfilePath(); tf != "" {
-		h += "  " + styleDim.Render(termsafe.Text(tf))
-	}
-	return ansi.Truncate(h, m.width, "…")
-}
-
-func (m Model) footer() string {
-	f := "↑/↓ move  r trigger  q quit"
-	if m.flash != "" {
-		f = termsafe.Text(m.flash) + "  ·  " + f
-	}
-	return styleDim.Render(ansi.Truncate(f, m.width, "…"))
-}
-
-func firstLine(s string) string {
-	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
-	return s
 }

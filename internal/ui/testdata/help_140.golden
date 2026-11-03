@@ -1,0 +1,30 @@
+╭─ Resources  ✗ 1  ✓ 2/3 ────────────────╮╭─ All Resources  [follow] ──────────────────────────────────────────────────────────────────────╮
+│All Resources                           ││api starting                                                                                   ┃│
+│▼ backend (1)                           ││web ready                                                                                      ┃│
+│  ●  api                 11m ago · 11.4s││                                                                                               ┃│
+│▼ frontend (1)                          ││                                                                                               ┃│
+│  ●  web                                ││       ╭─ Help ───────────────────────────────╮                                                ┃│
+│▼ ungrouped (1)                         ││       │Global                                │                                                ┃│
+│  ●  (Tiltfile)                         ││       │  q                quit               │                                                ┃│
+│                                        ││       │  tab              switch pane        │                                                ┃│
+│                                        ││       │  ?                help               │                                                ┃│
+│                                        ││       │                                      │                                                ┃│
+│                                        ││       │Resource list                         │                                                ┃│
+│                                        ││       │  j/k              move               │                                                ┃│
+│                                        ││       │  g/G              first/last         │                                                ┃│
+│                                        ││       │  e/c              expand/collapse all│                                                ┃│
+│                                        ││       │  d                show/hide disabled │                                                ┃│
+│                                        ││       │                                      │                                                ┃│
+│                                        ││       │Logs                                  │                                                ┃│
+│                                        ││       │  j/k/pgup/pgdown  scroll             │                                                ┃│
+│                                        ││       │  g/G              top/bottom         │                                                ┃│
+│                                        ││       │  s                follow on/off      │                                                ┃│
+│                                        ││       │  t                timestamps on/off  │                                                ┃│
+│                                        ││       ╰──────────────────────────────────────╯                                                ┃│
+│                                        ││                                                                                               ┃│
+│                                        ││                                                                                               ┃│
+│                                        ││                                                                                               ┃│
+│                                        ││                                                                                               ┃│
+│● live  localhost:10350  13m 21s        ││                                                                                               ┃│
+╰────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+ r trigger · tab switch · ? help · q quit
