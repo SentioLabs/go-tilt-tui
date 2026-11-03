@@ -11,7 +11,10 @@ import (
 	"github.com/sentiolabs/go-tilt-tui/internal/tilt"
 )
 
-func BenchmarkRedraw(b *testing.B) {
+// benchStore holds 44 resources of 20 000 lines each. Every tenth line
+// is coloured, every twentieth is wide text and every fiftieth wraps.
+func benchStore(b *testing.B) *logstore.Store {
+	b.Helper()
 	s := logstore.New(logstore.Options{MaxBytesPerResource: 8 << 20})
 	const resources, perResource = 44, 20000
 	spans := map[string]any{}
@@ -47,11 +50,52 @@ func BenchmarkRedraw(b *testing.B) {
 		}
 		s.Append(v)
 	}
-	m := New(s, mono(b))
+	return s
+}
+
+func BenchmarkRedraw(b *testing.B) {
+	m := New(benchStore(b), mono(b))
 	m.SetSource(logstore.Source{All: true}, "All Resources")
 	m.View(140, 50, true)
 	b.ResetTimer()
 	for b.Loop() {
 		m.View(140, 50, true)
+	}
+}
+
+// BenchmarkRedrawSearch redraws with an active search whose matches are
+// on screen. Each round sets a new query, so every visible line is
+// matched and highlighted again.
+func BenchmarkRedrawSearch(b *testing.B) {
+	m := New(benchStore(b), mono(b))
+	m.SetSource(logstore.Source{All: true}, "All Resources")
+	m.View(140, 50, true)
+	queries := []string{"cde", "CDE", "日本"}
+	b.ResetTimer()
+	i := 0
+	for b.Loop() {
+		m.SetQuery(queries[i%len(queries)])
+		i++
+		m.View(140, 50, true)
+	}
+}
+
+// BenchmarkNextMatch times one n press: a walk over every line of every
+// resource.
+func BenchmarkNextMatch(b *testing.B) {
+	m := New(benchStore(b), mono(b))
+	m.SetSource(logstore.Source{All: true}, "All Resources")
+	m.View(140, 50, true)
+	var names []string
+	for r := range 44 {
+		names = append(names, fmt.Sprintf("res-%02d", r))
+	}
+	parts := Parts(m.Source(), names)
+	m.SetQuery("日本")
+	b.ResetTimer()
+	for b.Loop() {
+		if !m.NextMatch(parts) {
+			b.Fatal("no match")
+		}
 	}
 }

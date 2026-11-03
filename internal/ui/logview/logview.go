@@ -47,17 +47,26 @@ type Model struct {
 	lastH      int
 
 	track, thumb string // scrollbar cells, rendered once
+
+	// Search state. match is the Seq of the current match, 0 for none.
+	query      string
+	mt         matcher
+	matchOn    string // SGR that starts a highlight, from theme.Match
+	match      logstore.Seq
+	matchPos   int
+	matchTotal int
 }
 
 func New(store *logstore.Store, th theme.Theme) *Model {
 	return &Model{
-		store:  store,
-		th:     th,
-		follow: true,
-		resets: store.Resets(),
-		cache:  map[cacheKey][]row{},
-		track:  th.Dim.Render("│"),
-		thumb:  "┃",
+		store:   store,
+		th:      th,
+		follow:  true,
+		resets:  store.Resets(),
+		cache:   map[cacheKey][]row{},
+		track:   th.Dim.Render("│"),
+		thumb:   "┃",
+		matchOn: sgrOpen(th.Match.Render),
 	}
 }
 
@@ -66,6 +75,7 @@ func (m *Model) SetSource(src logstore.Source, title string) {
 	m.src, m.title = src, title
 	m.follow = true
 	m.top, m.topRow = 0, 0
+	m.match, m.matchPos, m.matchTotal = 0, 0, 0
 }
 
 func (m *Model) Source() logstore.Source { return m.src }
@@ -193,6 +203,9 @@ func (m *Model) rowsOf(l logstore.Line) []row {
 		clear(m.cache)
 	}
 	text := l.Text
+	if m.query != "" && m.mt.match(text) {
+		text = highlight(text, m.mt.spans(text), m.matchOn)
+	}
 	if m.timestamps {
 		text = m.th.Dim.Render(l.Time.Local().Format("15:04:05")) + " " + text
 	}
@@ -212,12 +225,7 @@ func (m *Model) View(w, h int, focused bool) string {
 	if h <= 0 {
 		return ""
 	}
-	if r := m.store.Resets(); r != m.resets {
-		m.resets = r
-		clear(m.cache)
-		m.follow = true
-		m.top, m.topRow = 0, 0
-	}
+	m.checkReset()
 	m.lastW, m.lastH = max(0, w-1), h
 
 	var visible []row
@@ -257,6 +265,18 @@ func (m *Model) View(w, h int, focused bool) string {
 		b.WriteString(bar[i])
 	}
 	return b.String()
+}
+
+// checkReset drops every Seq the view holds once the store has reset,
+// because a reset restarts Seq. The view then follows the newest lines.
+func (m *Model) checkReset() {
+	if r := m.store.Resets(); r != m.resets {
+		m.resets = r
+		clear(m.cache)
+		m.follow = true
+		m.top, m.topRow = 0, 0
+		m.match, m.matchPos, m.matchTotal = 0, 0, 0
+	}
 }
 
 // followRows returns the last h rows of the newest lines and records the

@@ -1,0 +1,20 @@
+╭─ Resources  ✗ 1  ✓ 2/3 ────────────────╮╭─ All Resources  [follow] ──────────────────────────────────────────────────────────────────────╮
+│All Resources                           ││api line 24                                                                                    ││
+│▼ backend (1)                           ││api line 25                                                                                    ││
+│  ●  api                 11m ago · 11.4s││api line 26                                                                                    ││
+│▼ frontend (1)                          ││api line 27                                                                                    ││
+│  ●  web                                ││api line 28                                                                                    ││
+│▼ ungrouped (1)                         ││api line 29                                                                                    ││
+│  ●  (Tiltfile)                         ││ap╭─ Search logs ──────────────────────────────────╮                                           ││
+│                                        ││ap│/bo                                             │                                           ││
+│                                        ││ap│enter search · esc cancel                       │                                           ││
+│                                        ││ap╰────────────────────────────────────────────────╯                                           ││
+│                                        ││api line 34                                                                                    ┃│
+│                                        ││api line 35                                                                                    ┃│
+│                                        ││api line 36                                                                                    ┃│
+│                                        ││api line 37                                                                                    ┃│
+│                                        ││api line 38                                                                                    ┃│
+│                                        ││api line 39                                                                                    ┃│
+│● live  localhost:10350  13m 21s        ││api line 40                                                                                    ││
+╰────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+ r trigger · / search · tab switch · ? help · q quit
