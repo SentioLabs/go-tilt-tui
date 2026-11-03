@@ -149,6 +149,65 @@ func TestFilterKeepsSelectionWhenStatusChanges(t *testing.T) {
 	}
 }
 
+// onFEHeader puts the cursor on the fe header: G, then k past off, wait, busy.
+func onFEHeader(t *testing.T, m *Model) {
+	t.Helper()
+	m.HandleKey(key("G"))
+	for range 3 {
+		m.HandleKey(key("k"))
+	}
+	if !m.OnHeader() || m.Selected() != (logstore.Source{Resource: "busy"}) {
+		t.Fatalf("setup: OnHeader=%v Selected=%+v", m.OnHeader(), m.Selected())
+	}
+}
+
+func TestFilterKeepsSelectedHeader(t *testing.T) {
+	m := New(th(t))
+	m.SetResources(filterSet())
+	onFEHeader(t, m)
+	m.SetFilter(FilterHealthy)
+	if m.Selected() != (logstore.Source{Resource: "busy"}) || !m.OnHeader() {
+		t.Fatalf("filter moved the selection: OnHeader=%v Selected=%+v", m.OnHeader(), m.Selected())
+	}
+	got := strings.Join(plain(m, 40, 6), "\n")
+	if !strings.Contains(got, "▼ fe (3)") || !strings.Contains(got, "▼ be (2)") {
+		t.Fatalf("header not kept:\n%s", got)
+	}
+	if got := names(m); !slices.Equal(got, []string{"ok"}) {
+		t.Fatalf("rows = %q", got)
+	}
+	m.HandleKey(key("k"))
+	if strings.Contains(strings.Join(plain(m, 40, 6), "\n"), "fe") {
+		t.Fatalf("header stayed after the cursor left")
+	}
+	m.HandleKey(key("g"))
+	m.SetFilter(FilterAll)
+	if m.Selected() != (logstore.Source{All: true}) {
+		t.Fatalf("Selected = %+v", m.Selected())
+	}
+}
+
+func TestFilterKeepsSelectedHeaderWhenStatusChanges(t *testing.T) {
+	m := New(th(t))
+	rs := filterSet()
+	m.SetResources(rs)
+	m.SetFilter(FilterInProgress)
+	m.Select("busy")
+	m.HandleKey(key("k"))
+	if !m.OnHeader() || m.Selected() != (logstore.Source{Resource: "busy"}) {
+		t.Fatalf("setup: OnHeader=%v Selected=%+v", m.OnHeader(), m.Selected())
+	}
+	rs[2] = res("busy", labels("app", "fe"))
+	rs[3] = res("wait", labels("app", "fe"))
+	m.SetResources(rs)
+	if m.Selected() != (logstore.Source{Resource: "busy"}) || !m.OnHeader() {
+		t.Fatalf("update moved the selection: OnHeader=%v Selected=%+v", m.OnHeader(), m.Selected())
+	}
+	if got := strings.Join(plain(m, 40, 6), "\n"); !strings.Contains(got, "▼ fe (3)") {
+		t.Fatalf("header not kept:\n%s", got)
+	}
+}
+
 func TestCountsIgnoreFilter(t *testing.T) {
 	m := New(th(t))
 	m.SetResources(filterSet())

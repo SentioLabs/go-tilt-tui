@@ -83,6 +83,9 @@ type Model struct {
 	// pinned names a resource that stays listed even though visible
 	// rejects it, because the cursor was on it when it was filtered out.
 	pinned string
+	// pinnedGroup names a group whose header stays listed even though the
+	// filter empties the group, because the cursor is on that header.
+	pinnedGroup string
 
 	offset    int  // first row drawn by View
 	showsTime bool // the last View drew a relative time
@@ -150,9 +153,12 @@ func (m *Model) visible(r tilt.Resource) bool {
 	return !(m.hideDisabled && r.IsDisabled()) && m.filter.Match(r)
 }
 
-// pinSelectedIfHidden pins the selected resource when an update makes the
-// filter reject it, so a status change never moves the selection.
+// pinSelectedIfHidden pins the selected resource or header when an update
+// makes the filter hide it, so a status change never moves the selection.
 func (m *Model) pinSelectedIfHidden() {
+	if m.target.kind == rowHeader {
+		m.pinnedGroup = m.target.name
+	}
 	if m.target.kind != rowResource {
 		return
 	}
@@ -164,12 +170,15 @@ func (m *Model) pinSelectedIfHidden() {
 	}
 }
 
-// refilter rebuilds the rows after a filter change. It pins the resource
-// under the cursor first, so the change never moves the selection.
+// refilter rebuilds the rows after a filter change. It pins the resource or
+// header under the cursor first, so the change never moves the selection.
 func (m *Model) refilter() {
-	m.pinned = ""
-	if r := m.rows[m.cursor]; r.kind == rowResource {
+	m.pinned, m.pinnedGroup = "", ""
+	switch m.rows[m.cursor].kind {
+	case rowResource:
 		m.pinned = m.target.name
+	case rowHeader:
+		m.pinnedGroup = m.target.name
 	}
 	m.rebuild()
 }
@@ -190,9 +199,10 @@ func (m *Model) listed(g group) bool {
 func (m *Model) rebuild() {
 	m.rows = append(m.rows[:0], row{kind: rowAll})
 	for _, g := range m.groups {
-		// The status filter hides a group it empties. Hidden disabled
-		// resources leave their group's header in place.
-		if m.filter != FilterAll && !m.listed(g) {
+		// The status filter hides a group it empties, except under the
+		// cursor. Hidden disabled resources leave their group's header
+		// in place.
+		if m.filter != FilterAll && !m.listed(g) && g.name != m.pinnedGroup {
 			continue
 		}
 		if m.grouped {
@@ -222,11 +232,17 @@ func (m *Model) rebuild() {
 	m.dropStalePin()
 }
 
-// dropStalePin unpins the pinned resource once the cursor is off it, so
-// the filter removes it from the list.
+// dropStalePin unpins the resource and header once the cursor is off them,
+// so the filter removes them from the list.
 func (m *Model) dropStalePin() {
+	stale := false
 	if m.pinned != "" && m.target != (target{kind: rowResource, name: m.pinned}) {
-		m.pinned = ""
+		m.pinned, stale = "", true
+	}
+	if m.pinnedGroup != "" && m.target != (target{kind: rowHeader, name: m.pinnedGroup}) {
+		m.pinnedGroup, stale = "", true
+	}
+	if stale {
 		m.rebuild()
 	}
 }
