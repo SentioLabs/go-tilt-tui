@@ -40,15 +40,16 @@ type clickPayload struct {
 }
 
 // ClickButton records a click on b with the given input values and
-// returns the updated button (with its new resourceVersion). Inputs not in
-// values keep their current value. Returns ErrConflict on HTTP 409.
+// returns the updated button (with its new resourceVersion). An input left
+// out of values is sent with its Tiltfile spec default. Returns
+// ErrConflict on HTTP 409.
 //
 // A text, choice or hidden input takes a string and a bool input takes a
-// bool. "Current value" means the spec's: the text and bool default, the
-// first choice and the hidden value. Tilt rewrites the hidden value itself,
-// as the disable toggle does with its "action" input. A key that names no
-// input, a value of the wrong type or a choice not on the list is an error,
-// and nothing is sent.
+// bool. The spec default is the text and bool default, the first choice
+// and the hidden value. Tilt rewrites the hidden value itself, as the
+// disable toggle does with its "action" input. A key that names no input,
+// a value of the wrong type or a choice not on the list is an error, and
+// nothing is sent.
 func (c *Client) ClickButton(ctx context.Context, b Button, values map[string]any) (Button, error) {
 	name := b.Metadata.Name
 	path, err := buttonStatusPath(name)
