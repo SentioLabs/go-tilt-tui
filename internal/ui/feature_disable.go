@@ -28,6 +28,10 @@ const (
 	// toggleConflictText is the flash for an HTTP 409. ctrl+d doesn't
 	// retry.
 	toggleConflictText = "button changed, try again"
+	// toggleChangedText follows the resource name when the toggle or the
+	// resource no longer matches what the user chose. ctrl+d doesn't
+	// click then.
+	toggleChangedText = " changed, try again"
 )
 
 // togglePending is one disable toggle waiting for Tilt to flip its
@@ -116,7 +120,9 @@ func (m *Model) pressToggle(r tilt.Resource) tea.Cmd {
 }
 
 // clickToggle marks resource's toggle pending and clicks it with its
-// current values. It reads the toggle from the store at click time.
+// current values. It reads the toggle and the resource from the store at
+// click time. It sends nothing when either no longer matches disable:
+// the click would do the opposite.
 func (m *Model) clickToggle(resource string, disable bool) tea.Cmd {
 	s := m.toggles()
 	if _, busy := s.pending[resource]; busy {
@@ -125,6 +131,20 @@ func (m *Model) clickToggle(resource string, disable bool) tea.Cmd {
 	b, ok := m.store.DisableButton(resource)
 	if !ok {
 		return m.flashCmd(termsafe.Text(resource)+" has no disable toggle", 0)
+	}
+	// Action "on" disables the resource and "off" enables it.
+	want := "off"
+	if disable {
+		want = "on"
+	}
+	changed := toggleAction(b) != want
+	for _, r := range m.store.Resources() {
+		if r.Name() == resource && r.IsDisabled() == disable {
+			changed = true
+		}
+	}
+	if changed {
+		return m.flashCmd(termsafe.Text(resource)+toggleChangedText, 0)
 	}
 	values := map[string]any{}
 	for _, in := range b.Spec.Inputs {

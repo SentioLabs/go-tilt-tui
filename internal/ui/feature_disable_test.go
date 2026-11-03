@@ -394,3 +394,63 @@ func TestToggleGolden(t *testing.T) {
 		t.Errorf("%s mismatch:\n%s", path, got)
 	}
 }
+
+// toggleSkipped checks that ctrl+d sent no click, flashed the changed
+// text and left api's toggle free for the next ctrl+d.
+func toggleSkipped(t *testing.T, m Model, fc *fakeClient) {
+	t.Helper()
+	if len(fc.clicks) != 0 {
+		t.Fatalf("clicks = %#v, want none", fc.clicks)
+	}
+	if s := screen(m); !strings.Contains(s, "api changed, try again") {
+		t.Fatalf("no changed flash:\n%s", s)
+	}
+	if togglePendingAPI(m) || len(m.overlays) != 0 {
+		t.Fatalf("pending %v, %d overlays", togglePendingAPI(m), len(m.overlays))
+	}
+}
+
+// An enabled resource whose toggle holds action "off" would be enabled
+// by a click, not disabled.
+func TestToggleSkipsClickWhenActionDisagrees(t *testing.T) {
+	m, fc, _ := toggleSetup(t, 140, 20, toggleButton("19", "off", true))
+	m = toggleSend(m, toggleCtrlD)
+	if s := screen(m); !strings.Contains(s, "disable api? y/n") {
+		t.Fatalf("no confirmation:\n%s", s)
+	}
+	m = toggleSend(m, key("y"))
+	toggleSkipped(t, m, fc)
+	m = toggleSend(m, toggleCtrlD)
+	if !strings.Contains(screen(m), "disable api? y/n") {
+		t.Fatal("ctrl+d after a skipped click did not ask again")
+	}
+}
+
+func TestToggleSkipsClickWhenActionDisagreesWithoutConfirmation(t *testing.T) {
+	m, fc, _ := toggleSetup(t, 140, 20, toggleButton("19", "off", false))
+	m = toggleSend(m, toggleCtrlD)
+	toggleSkipped(t, m, fc)
+}
+
+// Tilt's web UI disables api while the question is open.
+func TestToggleSkipsClickWhenResourceFlippedDuringQuestion(t *testing.T) {
+	m, fc, _ := toggleSetup(t, 140, 20, toggleButton("19", "on", true))
+	m = toggleSend(m, toggleCtrlD)
+	if s := screen(m); !strings.Contains(s, "disable api? y/n") {
+		t.Fatalf("no confirmation:\n%s", s)
+	}
+	flip := disabledAPI()
+	flip.UIButtons = []tilt.Button{toggleButton("22", "off", true)}
+	m, _ = send(m, flip)
+	m = toggleSend(m, key("y"))
+	toggleSkipped(t, m, fc)
+}
+
+// The resource can show disabled before Tilt flips the toggle's action.
+func TestToggleSkipsClickWhenOnlyResourceFlipped(t *testing.T) {
+	m, fc, _ := toggleSetup(t, 140, 20, toggleButton("19", "on", true))
+	m = toggleSend(m, toggleCtrlD)
+	m, _ = send(m, disabledAPI())
+	m = toggleSend(m, key("y"))
+	toggleSkipped(t, m, fc)
+}
