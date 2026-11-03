@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // Tilt runs the tilt binary resolved once at startup.
@@ -58,11 +60,52 @@ func (noFileError) Error() string { return "no such file" }
 
 func (noFileError) Is(target error) bool { return target == exec.ErrNotFound }
 
+// maxFileWatchOutput bounds `tilt get filewatches` output. More is an
+// error, never a truncated list.
+const maxFileWatchOutput = 16 << 20
+
 // FileWatches runs `tilt get filewatches -o json --host localhost --port
 // port` and returns its raw JSON. It never takes a hostname: Tilt's HTTP
 // proxy refuses filewatches, so this is the one query that needs the CLI,
 // and it only ever targets the local Tilt. Callers must not use it under
 // --allow-remote.
 func (t Tilt) FileWatches(ctx context.Context, port int) ([]byte, error) {
-	panic("T0 stub")
+	if t.Binary == "" {
+		return nil, errors.New("tilt get filewatches: no tilt binary (call FindTilt first)")
+	}
+	cmd := exec.CommandContext(ctx, t.Binary,
+		"get", "filewatches", "-o", "json", "--host", "localhost", "--port", strconv.Itoa(port))
+	stdout := &capped{max: maxFileWatchOutput}
+	stderr := &tail{max: 4 << 10}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	cmd.WaitDelay = waitDelay
+	err := cmd.Run()
+	if stdout.over {
+		return nil, fmt.Errorf("tilt get filewatches: output over %d bytes", maxFileWatchOutput)
+	}
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("tilt get filewatches: %w: %s", err, msg)
+		}
+		return nil, fmt.Errorf("tilt get filewatches: %w", err)
+	}
+	return stdout.buf, nil
+}
+
+// capped keeps the first max bytes written to it and records whether
+// more arrived. It never fails a write, so the writer never blocks.
+type capped struct {
+	max  int
+	buf  []byte
+	over bool
+}
+
+func (c *capped) Write(p []byte) (int, error) {
+	if room := c.max - len(c.buf); len(p) > room {
+		c.buf = append(c.buf, p[:max(0, room)]...)
+		c.over = true
+		return len(p), nil
+	}
+	c.buf = append(c.buf, p...)
+	return len(p), nil
 }
