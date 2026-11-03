@@ -203,7 +203,7 @@ func (m Model) render() string {
 
 	nameW := 12
 	for _, r := range m.rows {
-		nameW = max(nameW, len(r.Name()))
+		nameW = max(nameW, ansi.StringWidth(safe(r.Name())))
 	}
 	nameW = min(nameW, m.width/2)
 
@@ -217,10 +217,10 @@ func (m Model) render() string {
 		st := r.Combined()
 		line := fmt.Sprintf(" %s %-*s  %-8s  %-8s  %s",
 			statusDot[st].Render("●"),
-			nameW, ansi.Truncate(r.Name(), nameW, "…"),
-			r.Kind(),
+			nameW, ansi.Truncate(safe(r.Name()), nameW, "…"),
+			safe(r.Kind()),
 			st,
-			firstLine(r.LastBuildError()),
+			safe(firstLine(r.LastBuildError())),
 		)
 		line = ansi.Truncate(line, m.width, "…")
 		if i == m.cursor {
@@ -248,12 +248,12 @@ func (m Model) header() string {
 	case connDown:
 		conn = statusDot[tilt.StatusUnhealthy].Render("● disconnected")
 		if m.connErr != nil {
-			conn += " " + styleErrText.Render(m.connErr.Error())
+			conn += " " + styleErrText.Render(safe(m.connErr.Error()))
 		}
 	}
 	h := fmt.Sprintf("%s  %s  %s", styleTitle.Render("tilt-tui"), styleDim.Render(m.addr), conn)
 	if tf := m.store.TiltfilePath(); tf != "" {
-		h += "  " + styleDim.Render(tf)
+		h += "  " + styleDim.Render(safe(tf))
 	}
 	return ansi.Truncate(h, m.width, "…")
 }
@@ -261,7 +261,7 @@ func (m Model) header() string {
 func (m Model) footer() string {
 	f := "↑/↓ move  r trigger  q quit"
 	if m.flash != "" {
-		f = m.flash + "  ·  " + f
+		f = safe(m.flash) + "  ·  " + f
 	}
 	return styleDim.Render(ansi.Truncate(f, m.width, "…"))
 }
