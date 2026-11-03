@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -443,5 +445,260 @@ func TestUpEarlyExitReturnsStderr(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("printed message %q lacks %q", msg, want)
 		}
+	}
+}
+
+// runMainEnv makes the test binary run main instead of the tests, so a
+// test can run tilt-tui as a process and signal it.
+const runMainEnv = "TILT_TUI_TEST_RUN_MAIN"
+
+func TestMain(m *testing.M) {
+	if os.Getenv(runMainEnv) == "1" {
+		main()
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
+
+// signalTilt writes a fake `tilt` to a new dir. It writes its PID to
+// dir/pid, then runs until SIGTERM, which it records in dir/term.
+func signalTilt(t *testing.T) (dir string) {
+	t.Helper()
+	dir = t.TempDir()
+	script := "#!/bin/sh\n" +
+		"trap \"echo TERM > '" + filepath.Join(dir, "term") + "'; exit 0\" TERM\n" +
+		"echo $$ > '" + filepath.Join(dir, "pid.tmp") + "'\n" +
+		"mv '" + filepath.Join(dir, "pid.tmp") + "' '" + filepath.Join(dir, "pid") + "'\n" +
+		"while :; do sleep 0.05; done\n"
+	if err := os.WriteFile(filepath.Join(dir, "tilt"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// startTUI runs `tilt-tui --port port --up -- --file x` with the fake
+// tilt in dir first on $PATH and its config in dir.
+func startTUI(t *testing.T, dir string, port int, stdio []*os.File, sys *syscall.SysProcAttr) *os.Process {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// os.StartProcess keeps duplicate variables and the first one wins,
+	// so drop the ones the test sets.
+	var env []string
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if k != "PATH" && k != "XDG_CONFIG_HOME" && k != "TILT_PORT" && k != runMainEnv {
+			env = append(env, kv)
+		}
+	}
+	env = append(env, runMainEnv+"=1",
+		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"XDG_CONFIG_HOME="+filepath.Join(dir, "cfg"))
+	p, err := os.StartProcess(self,
+		[]string{self, "--port", strconv.Itoa(port), "--up", "--", "--file", "x"},
+		&os.ProcAttr{Env: env, Files: stdio, Sys: sys})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// waitPid waits for the fake tilt in dir to write its PID. If the test
+// ends with that tilt still running, cleanup kills its process group.
+func waitPid(t *testing.T, dir string) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		raw, err := os.ReadFile(filepath.Join(dir, "pid"))
+		if err == nil {
+			pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				// Without a TERM record this tilt never exited, so the
+				// PID is still its own.
+				if _, err := os.Stat(filepath.Join(dir, "term")); err != nil && syscall.Kill(pid, 0) == nil {
+					syscall.Kill(-pid, syscall.SIGKILL)
+				}
+			})
+			return pid
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake tilt never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// waitExit waits for p to exit, killing it after d.
+func waitExit(t *testing.T, p *os.Process, d time.Duration) *os.ProcessState {
+	t.Helper()
+	type result struct {
+		st  *os.ProcessState
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		st, err := p.Wait()
+		done <- result{st, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		return r.st
+	case <-time.After(d):
+		p.Kill()
+		<-done
+		t.Fatalf("tilt-tui still running %v after the signal", d)
+		return nil
+	}
+}
+
+// checkTiltStopped fails unless the fake tilt in dir got SIGTERM and is
+// gone.
+func checkTiltStopped(t *testing.T, dir string, pid int) {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(dir, "term")); err != nil {
+		t.Errorf("fake tilt (pid %d) got no SIGTERM: %v", pid, err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("fake tilt (pid %d) still exists after tilt-tui exited: kill 0 = %v", pid, err)
+	}
+}
+
+func TestUpSignalDuringStartupStopsTilt(t *testing.T) {
+	dir := signalTilt(t)
+	out, err := os.Create(filepath.Join(dir, "out"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer out.Close()
+	devNull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devNull.Close()
+	// A new session has no terminal, so tilt-tui can't take over the one
+	// running the tests.
+	p := startTUI(t, dir, freePort(t), []*os.File{devNull, out, out}, &syscall.SysProcAttr{Setsid: true})
+	pid := waitPid(t, dir)
+	// tilt has just started, so tilt-tui is inside the 2 s startup window.
+	if err := p.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	st := waitExit(t, p, 10*time.Second)
+	checkTiltStopped(t, dir, pid)
+	if st.ExitCode() != 1 {
+		t.Errorf("tilt-tui ended with %v, want exit status 1", st)
+	}
+	if printed, _ := os.ReadFile(out.Name()); len(printed) != 0 {
+		t.Errorf("tilt-tui printed %q, want nothing", printed)
+	}
+}
+
+// Linux ioctl requests for the test pty.
+const (
+	linuxTIOCSPTLCK = 0x40045431
+	linuxTIOCGPTN   = 0x80045430
+	linuxTIOCSWINSZ = 0x5414
+)
+
+func ioctl(f *os.File, req uintptr, arg unsafe.Pointer) error {
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), req, uintptr(arg)); errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+// openPTY opens a 100x30 pseudo-terminal pair.
+func openPTY(t *testing.T) (master, slave *os.File) {
+	t.Helper()
+	m, err := os.OpenFile("/dev/ptmx", os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		t.Skipf("no pty: %v", err)
+	}
+	t.Cleanup(func() { m.Close() })
+	var unlock int32
+	if err := ioctl(m, linuxTIOCSPTLCK, unsafe.Pointer(&unlock)); err != nil {
+		t.Fatalf("unlock pty: %v", err)
+	}
+	var n uint32
+	if err := ioctl(m, linuxTIOCGPTN, unsafe.Pointer(&n)); err != nil {
+		t.Fatalf("pty number: %v", err)
+	}
+	size := [4]uint16{30, 100, 0, 0} // rows, columns, unused pixel sizes
+	if err := ioctl(m, linuxTIOCSWINSZ, unsafe.Pointer(&size)); err != nil {
+		t.Fatalf("pty size: %v", err)
+	}
+	s, err := os.OpenFile("/dev/pts/"+strconv.FormatUint(uint64(n), 10), os.O_RDWR|syscall.O_NOCTTY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m, s
+}
+
+// lockedBuffer collects what tilt-tui draws on the pty.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// Bubble Tea catches SIGINT and SIGTERM but not SIGHUP, which a closed
+// terminal window sends.
+func TestUpHangupQuitsAndStopsTilt(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the test pty uses Linux ioctls")
+	}
+	dir := signalTilt(t)
+	master, slave := openPTY(t)
+	var drawn lockedBuffer
+	copied := make(chan struct{})
+	go func() {
+		defer close(copied)
+		io.Copy(&drawn, master) // ends with EIO once tilt-tui exits
+	}()
+	p := startTUI(t, dir, freePort(t), []*os.File{slave, slave, slave},
+		&syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0})
+	slave.Close()
+	pid := waitPid(t, dir)
+
+	// The status line shows once launch has returned and the TUI runs.
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(drawn.String(), "starting tilt") {
+		if time.Now().After(deadline) {
+			p.Kill()
+			t.Fatalf("the TUI never drew the starting state:\n%q", drawn.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := p.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	st := waitExit(t, p, 15*time.Second)
+	checkTiltStopped(t, dir, pid)
+	if !st.Exited() {
+		t.Errorf("tilt-tui ended with %v, want a normal exit", st)
+	}
+	select {
+	case <-copied:
+	case <-time.After(5 * time.Second):
+		t.Error("the pty stayed open after tilt-tui exited")
 	}
 }

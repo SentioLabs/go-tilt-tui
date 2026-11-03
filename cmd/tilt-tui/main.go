@@ -7,8 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -24,8 +26,16 @@ import (
 // checkHostTimeout bounds the startup loopback check.
 const checkHostTimeout = 5 * time.Second
 
+// errSignaled is what run returns when a signal ends --up before the TUI
+// starts. main exits 1 without printing it.
+var errSignaled = errors.New("stopped by a signal")
+
 func main() {
-	if err := run(); err != nil {
+	err := run()
+	if errors.Is(err, errSignaled) {
+		os.Exit(1)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "tilt-tui:", err)
 		os.Exit(1)
 	}
@@ -73,7 +83,13 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		sup = &supervisor{ctx: ctx, start: tiltStarter(t), port: opts.port, args: opts.tiltArgs}
+		// tilt runs in its own process group, so the terminal's signals
+		// never reach it. sigCtx catches them instead: during the startup
+		// window Up stops tilt when it ends, and later it quits the TUI so
+		// the deferred Close stops tilt.
+		sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+		sup = &supervisor{ctx: sigCtx, start: tiltStarter(t), port: opts.port, args: opts.tiltArgs}
 	}
 
 	logs := logstore.New(logstore.Options{
@@ -110,14 +126,24 @@ func run() error {
 		// the screen, so an early failure prints as a plain error.
 		// Its text holds tilt's stderr, so it is made safe first.
 		if err := sup.launch(); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return errSignaled
+			}
 			return safeStartError(err)
 		}
-		// Deferred after cancel, so it runs first: the child gets
-		// SIGTERM and its grace period before anything else ends.
+		// Deferred after cancel and stop, so it runs first: the child
+		// gets SIGTERM and its grace period before anything else ends.
 		defer func() {
 			if err := sup.Close(); err != nil {
 				fmt.Fprintln(os.Stderr, "tilt-tui: stopping tilt:", err)
 			}
+		}()
+		// A signal quits the TUI the way q does. Bubble Tea doesn't catch
+		// SIGHUP, and a closed terminal sends it. stop ends sigCtx on
+		// return, and Quit after Run is a no-op, so this never blocks.
+		go func() {
+			<-sup.ctx.Done()
+			p.Quit()
 		}()
 	}
 
