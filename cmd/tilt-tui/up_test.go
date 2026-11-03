@@ -601,7 +601,7 @@ func TestUpSignalDuringStartupStopsTilt(t *testing.T) {
 	}
 }
 
-// Linux ioctl requests for the test pty.
+// Linux ioctl requests for the test pty, as numbered on amd64 and arm64.
 const (
 	linuxTIOCSPTLCK = 0x40045431
 	linuxTIOCGPTN   = 0x80045430
@@ -663,8 +663,8 @@ func (b *lockedBuffer) String() string {
 // Bubble Tea catches SIGINT and SIGTERM but not SIGHUP, which a closed
 // terminal window sends.
 func TestUpHangupQuitsAndStopsTilt(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("the test pty uses Linux ioctls")
+	if runtime.GOOS != "linux" || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
+		t.Skip("the test pty uses Linux ioctl numbers for amd64 and arm64")
 	}
 	dir := signalTilt(t)
 	master, slave := openPTY(t)
