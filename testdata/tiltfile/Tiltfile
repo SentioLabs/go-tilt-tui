@@ -1,0 +1,4 @@
+local_resource('hello', cmd='echo building hello', serve_cmd='while true; do echo hi; sleep 2; done')
+local_resource('slow-build', cmd='sleep 4 && echo done')
+local_resource('broken', cmd='echo oops >&2; exit 1')
+local_resource('manual', cmd='echo manual run', trigger_mode=TRIGGER_MODE_MANUAL, auto_init=False)
