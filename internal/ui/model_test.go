@@ -30,17 +30,19 @@ var now = time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 // --- Contract assertions ---
 
 var (
-	_ Client                                      = (*tilt.Client)(nil)
-	_ Client                                      = (*fakeClient)(nil)
-	_ func(context.Context, string) error         = Deps{}.Open
-	_ func(*Model, string, time.Duration) tea.Cmd = (*Model).flashCmd
-	_ func(*Model) (string, bool)                 = Feature{}.ConnStatus
-	_ func(*Model) []string                       = Feature{}.StatusParts
-	_ func(*Model) string                         = Feature{}.ListTitle
-	_ func(*Model) string                         = Feature{}.LogTitle
-	_ []Hint                                      = Feature{}.Hints
-	_ func(*Model) (string, string, bool)         = Feature{}.Panel
-	_ command.ID                                  = Hint{}.ID
+	_ Client                                             = (*tilt.Client)(nil)
+	_ Client                                             = (*fakeClient)(nil)
+	_ func(context.Context, string) error                = Deps{}.Open
+	_ func(context.Context) (map[string][]string, error) = Deps{}.Dependencies
+	_ func(context.Context) ([]tilt.FileWatch, error)    = Deps{}.FileWatches
+	_ func(*Model, string, time.Duration) tea.Cmd        = (*Model).flashCmd
+	_ func(*Model) (string, bool)                        = Feature{}.ConnStatus
+	_ func(*Model) []string                              = Feature{}.StatusParts
+	_ func(*Model) string                                = Feature{}.ListTitle
+	_ func(*Model) string                                = Feature{}.LogTitle
+	_ []Hint                                             = Feature{}.Hints
+	_ func(*Model) (string, string, bool)                = Feature{}.Panel
+	_ command.ID                                         = Hint{}.ID
 )
 
 // click is one ClickButton call the fake recorded.

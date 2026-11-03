@@ -81,6 +81,15 @@ type Deps struct {
 	// Open opens an http or https URL in the browser. main passes
 	// proc.OpenURL. nil means every call fails with errNoOpener.
 	Open func(ctx context.Context, url string) error
+	// Dependencies returns each resource's resourceDependencies from
+	// Tilt's engine dump. main passes tilt.Client.ResourceDependencies.
+	// nil means the info panel shows "dependency info unavailable".
+	Dependencies func(ctx context.Context) (map[string][]string, error)
+	// FileWatches returns Tilt's file watches. main passes a func that
+	// runs `tilt get filewatches` against the local Tilt. nil means the
+	// file-watch panel shows "file-watch info needs a local Tilt", which
+	// is what --allow-remote gets.
+	FileWatches func(ctx context.Context) ([]tilt.FileWatch, error)
 }
 
 type connState int
