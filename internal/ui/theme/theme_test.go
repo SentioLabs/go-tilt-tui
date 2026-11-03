@@ -23,7 +23,7 @@ var allStatuses = []tilt.Status{
 }
 
 func TestByName(t *testing.T) {
-	for _, name := range []string{"default", "mono"} {
+	for _, name := range Names {
 		th, ok := ByName(name)
 		if !ok || th.Name != name {
 			t.Fatalf("ByName(%q) = %q, %v", name, th.Name, ok)
@@ -34,10 +34,35 @@ func TestByName(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range []string{"tokyo-night", "terminal", "nope", ""} {
+	for _, name := range []string{"nope", "", "Tokyo-Night"} {
 		if _, ok := ByName(name); ok {
 			t.Errorf("ByName(%q) ok, want false", name)
 		}
+	}
+}
+
+// terminal colours only status, errors and warnings.
+func TestTerminalColoursOnlyStatus(t *testing.T) {
+	th, _ := ByName("terminal")
+	for i, s := range []lipgloss.Style{th.Border, th.BorderFocused, th.Title, th.Dim, th.Selected, th.Match} {
+		if s.GetForeground() != (lipgloss.NoColor{}) || s.GetBackground() != (lipgloss.NoColor{}) {
+			t.Errorf("terminal style %d sets a colour", i)
+		}
+	}
+	for _, s := range []tilt.Status{tilt.StatusHealthy, tilt.StatusUnhealthy, tilt.StatusPending, tilt.StatusBuilding} {
+		if th.Status[s].GetForeground() == (lipgloss.NoColor{}) {
+			t.Errorf("terminal status %v has no colour", s)
+		}
+	}
+}
+
+func TestTokyoNightUsesItsPalette(t *testing.T) {
+	th, _ := ByName("tokyo-night")
+	if got, want := th.Status[tilt.StatusHealthy].GetForeground(), lipgloss.Color("#9ece6a"); got != want {
+		t.Errorf("healthy = %v, want %v", got, want)
+	}
+	if got, want := th.Error.GetForeground(), lipgloss.Color("#f7768e"); got != want {
+		t.Errorf("error = %v, want %v", got, want)
 	}
 }
 
@@ -64,8 +89,11 @@ func TestSelect(t *testing.T) {
 		{"", "", "default", false},
 		{"", "mono", "mono", false},
 		{"", "default", "default", false},
+		{"", "tokyo-night", "tokyo-night", false},
+		{"", "terminal", "terminal", false},
 		{"", "nope", "default", true},
 		{"1", "default", "mono", false},
+		{"1", "tokyo-night", "mono", false},
 		{"1", "nope", "mono", false},
 	}
 	for _, tt := range tests {

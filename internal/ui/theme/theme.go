@@ -27,12 +27,15 @@ type Theme struct {
 // Names lists the built-in themes in display order.
 var Names = []string{"default", "tokyo-night", "terminal", "mono"}
 
-// ByName returns the named theme. ok is false for unknown names and for
-// names in Names that aren't built yet.
+// ByName returns the named theme. ok is false for unknown names.
 func ByName(name string) (t Theme, ok bool) {
 	switch name {
 	case "default":
 		return defaultTheme(), true
+	case "tokyo-night":
+		return tokyoNightTheme(), true
+	case "terminal":
+		return terminalTheme(), true
 	case "mono":
 		return monoTheme(), true
 	}
@@ -74,6 +77,68 @@ func defaultTheme() Theme {
 		Dim:           lipgloss.NewStyle().Faint(true),
 		Selected:      lipgloss.NewStyle().Reverse(true),
 		Match:         lipgloss.NewStyle().Foreground(lipgloss.Black).Background(lipgloss.Yellow),
+		Error:         fg(lipgloss.Red),
+		Warning:       fg(lipgloss.Yellow),
+	}
+}
+
+// tokyoNightTheme uses the Tokyo Night palette in truecolor. It sets no
+// background on plain text, so the terminal's background shows.
+func tokyoNightTheme() Theme {
+	fg := func(hex string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(hex)) }
+	const (
+		comment = "#565f89"
+		text    = "#c0caf5"
+		blue    = "#7aa2f7"
+		green   = "#9ece6a"
+		red     = "#f7768e"
+		yellow  = "#e0af68"
+		border  = "#3b4261"
+		selBg   = "#283457"
+		bg      = "#1a1b26"
+	)
+	return Theme{
+		Name: "tokyo-night",
+		Status: map[tilt.Status]lipgloss.Style{
+			tilt.StatusNone:      fg(comment),
+			tilt.StatusPending:   fg(yellow),
+			tilt.StatusBuilding:  fg(blue),
+			tilt.StatusHealthy:   fg(green),
+			tilt.StatusUnhealthy: fg(red),
+			tilt.StatusDisabled:  fg(comment),
+		},
+		Border:        fg(border),
+		BorderFocused: fg(blue),
+		Title:         fg(text).Bold(true),
+		Dim:           fg(comment),
+		Selected:      fg(text).Background(lipgloss.Color(selBg)),
+		Match:         fg(bg).Background(lipgloss.Color(yellow)),
+		Error:         fg(red),
+		Warning:       fg(yellow),
+	}
+}
+
+// terminalTheme keeps the terminal's own colours. Only status dots,
+// errors and warnings get ANSI colour. Everything else uses attributes.
+func terminalTheme() Theme {
+	plain := lipgloss.NewStyle()
+	fg := func(c color.Color) lipgloss.Style { return plain.Foreground(c) }
+	return Theme{
+		Name: "terminal",
+		Status: map[tilt.Status]lipgloss.Style{
+			tilt.StatusNone:      plain.Faint(true),
+			tilt.StatusPending:   fg(lipgloss.Yellow),
+			tilt.StatusBuilding:  fg(lipgloss.Blue),
+			tilt.StatusHealthy:   fg(lipgloss.Green),
+			tilt.StatusUnhealthy: fg(lipgloss.Red),
+			tilt.StatusDisabled:  plain.Faint(true),
+		},
+		Border:        plain.Faint(true),
+		BorderFocused: plain.Bold(true),
+		Title:         plain.Bold(true),
+		Dim:           plain.Faint(true),
+		Selected:      plain.Reverse(true),
+		Match:         plain.Underline(true).Bold(true),
 		Error:         fg(lipgloss.Red),
 		Warning:       fg(lipgloss.Yellow),
 	}
