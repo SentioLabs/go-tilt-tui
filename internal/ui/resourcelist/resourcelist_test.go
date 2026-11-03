@@ -420,3 +420,80 @@ func TestDotAndWarningStyles(t *testing.T) {
 		t.Fatalf("warning SGR = %v, want %v in %q", got, exp, rows[2])
 	}
 }
+
+func waitingOn(names ...string) opt {
+	return func(r *tilt.Resource) {
+		w := &tilt.Waiting{Reason: "waiting-for-local"}
+		for _, n := range names {
+			w.On = append(w.On, struct {
+				Kind string `json:"kind"`
+				Name string `json:"name"`
+			}{Kind: "UIResource", Name: n})
+		}
+		r.Status.Waiting = w
+	}
+}
+
+func newList(t *testing.T, rs ...tilt.Resource) *Model {
+	m := New(th(t))
+	m.SetResources(rs)
+	return m
+}
+
+func TestWaitingOnReplacesTime(t *testing.T) {
+	// "web" has a finished build, so without waiting it would show "… ago".
+	m := newList(t, res("web", built(11*time.Minute, 2*time.Second), waitingOn("api", "db")))
+	out := ansi.Strip(m.View(48, 5, true, now))
+	if !strings.Contains(out, "waiting on api, db") || strings.Contains(out, "ago") {
+		t.Fatalf("row:\n%s", out)
+	}
+	if m.ShowsRelativeTime() {
+		t.Fatal("waiting text must not start the relative-time tick")
+	}
+}
+
+func TestWaitingOnCutToFit(t *testing.T) {
+	m := newList(t, res("frontend-server", waitingOn("database-primary", "cache", "queue")))
+	for _, line := range strings.Split(ansi.Strip(m.View(32, 5, true, now)), "\n") {
+		if ansi.StringWidth(line) > 32 {
+			t.Fatalf("line wider than 32: %q", line)
+		}
+	}
+	out := ansi.Strip(m.View(32, 5, true, now))
+	if !strings.Contains(out, "frontend") || !strings.Contains(out, "waiting on") || !strings.Contains(out, "…") {
+		t.Fatalf("want the name start, a cut waiting text and an ellipsis:\n%s", out)
+	}
+}
+
+func TestWaitingOnHiddenWhenNarrow(t *testing.T) {
+	m := newList(t, res("web", waitingOn("api")))
+	if out := ansi.Strip(m.View(24, 5, true, now)); strings.Contains(out, "waiting") {
+		t.Fatalf("narrow pane showed waiting text:\n%s", out)
+	}
+}
+
+func TestWaitingOnNamesAreSafe(t *testing.T) {
+	m := newList(t, res("web", waitingOn("api\x1b]0;pwned\x07")))
+	if out := m.View(48, 5, true, now); strings.Contains(out, "\x1b]") {
+		t.Fatalf("OSC reached the row: %q", out)
+	}
+}
+
+func TestNoWaitingKeepsTime(t *testing.T) {
+	m := newList(t, res("web", built(11*time.Minute, 2*time.Second), func(r *tilt.Resource) { r.Status.Waiting = &tilt.Waiting{Reason: "x"} }))
+	if out := ansi.Strip(m.View(48, 5, true, now)); !strings.Contains(out, "ago") {
+		t.Fatalf("empty On hid the time:\n%s", out)
+	}
+}
+
+func TestWaitingOnIsDim(t *testing.T) {
+	st := th(t)
+	st.Dim = lipgloss.NewStyle().Faint(true)
+	m := New(st)
+	m.SetResources([]tilt.Resource{res("web", waitingOn("api"))})
+	// rows: All (cursor), web
+	row := strings.Split(m.View(48, 2, true, now), "\n")[1]
+	if got := sgrBefore(row, "waiting on"); !slices.Contains(got, "2") {
+		t.Fatalf("waiting text SGR = %v, want faint in %q", got, row)
+	}
+}

@@ -429,7 +429,8 @@ func (m *Model) headerText(name string) string {
 }
 
 // resourceRow lays out "<dot><warn> <name>", padding, then the relative
-// time. It returns the row as plain text and with the theme applied.
+// time or, while Tilt holds the resource, what it waits on. It returns the
+// row as plain text and with the theme applied.
 func (m *Model) resourceRow(r tilt.Resource, w int, now time.Time) (text, styled string) {
 	indent := ""
 	if m.grouped {
@@ -443,12 +444,21 @@ func (m *Model) resourceRow(r tilt.Resource, w int, now time.Time) (text, styled
 	if !m.visible(r) {
 		name += " (filtered)"
 	}
-	right := ""
+	right, waiting := "", false
 	if w >= minTimeWidth {
-		right = relativeTime(r, now)
+		if wt := waitingText(r); wt != "" {
+			right, waiting = wt, true
+		} else {
+			right = relativeTime(r, now)
+		}
 	}
 
 	prefixW := len(indent) + 3 // dot, warn, space
+	if waiting {
+		// Keep 8 cells of the name visible, plus 1 for "…" when it's cut.
+		keep := min(ansi.StringWidth(name), 9)
+		right = ansi.Truncate(right, max(0, w-prefixW-keep-1), "…")
+	}
 	nameW := w - prefixW
 	if right != "" {
 		nameW -= ansi.StringWidth(right) + 1
@@ -457,7 +467,9 @@ func (m *Model) resourceRow(r tilt.Resource, w int, now time.Time) (text, styled
 	pad := ""
 	if right != "" {
 		pad = strings.Repeat(" ", max(1, w-prefixW-ansi.StringWidth(name)-ansi.StringWidth(right)))
-		m.showsTime = true
+		if !waiting {
+			m.showsTime = true
+		}
 	}
 
 	text = ansi.Truncate(indent+"●"+warn+" "+name+pad+right, w, "")
@@ -468,8 +480,25 @@ func (m *Model) resourceRow(r tilt.Resource, w int, now time.Time) (text, styled
 		warn = m.th.Warning.Render(warn)
 	}
 	dot := m.th.Status[r.Combined()].Render("●")
+	if waiting {
+		right = m.th.Dim.Render(right)
+	}
 	styled = ansi.Truncate(indent+dot+warn+" "+name+pad+right, w, "")
 	return text, styled
+}
+
+// waitingText is "waiting on a, b" for a resource Tilt holds on others,
+// or "" when it holds on nothing.
+func waitingText(r tilt.Resource) string {
+	w := r.Status.Waiting
+	if w == nil || len(w.On) == 0 {
+		return ""
+	}
+	names := make([]string, len(w.On))
+	for i, o := range w.On {
+		names[i] = termsafe.Text(o.Name)
+	}
+	return "waiting on " + strings.Join(names, ", ")
 }
 
 // relativeTime is "<ago> · <duration>" for the latest build, or "" when
