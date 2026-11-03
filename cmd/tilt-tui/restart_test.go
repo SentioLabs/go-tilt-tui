@@ -212,7 +212,7 @@ func TestCloseDuringRestartStopsNewTilt(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// Up's in-window stop kills after 1 s, and the startup window is 2 s.
+	// The fake exits on SIGTERM at once, so Close returns long before the 2 s startup window ends.
 	if d := time.Since(begin); d >= 1500*time.Millisecond {
 		t.Errorf("Close took %v: it waited out the startup window", d)
 	}

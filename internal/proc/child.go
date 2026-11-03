@@ -18,6 +18,10 @@ var (
 	startupWindow = 2 * time.Second
 	// stderrMax is how much of tilt's stderr Child keeps.
 	stderrMax = 64 << 10
+	// startupStopGrace is how long Up gives tilt to stop when ctx ends
+	// inside the startup window. It matches the quit grace in
+	// cmd/tilt-tui.
+	startupStopGrace = 5 * time.Second
 )
 
 // waitDelay bounds how long Wait waits for stderr to close after tilt
@@ -73,7 +77,7 @@ func (t Tilt) Up(ctx context.Context, port int, args []string) (*Child, error) {
 	case <-c.done:
 		return nil, c.startupError()
 	case <-ctx.Done():
-		return nil, errors.Join(ctx.Err(), c.Stop(time.Second))
+		return nil, errors.Join(ctx.Err(), c.Stop(startupStopGrace))
 	}
 }
 
