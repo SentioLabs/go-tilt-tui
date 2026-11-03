@@ -3,10 +3,16 @@ package proc
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
+	"unicode/utf8"
 )
 
 // call is one opener command a test recorded.
@@ -48,6 +54,9 @@ func TestOpenURLRefusesBadURLs(t *testing.T) {
 		"http://:8080/",
 		"http://exa mple.com/",
 		"http://example.com/\x1b]52;c;cGF5bG9hZA==\x07",
+		"HTTP://host#frag\x1b",
+		"http://host/?q=\u009b",
+		"http://host/\x7f",
 	}
 	for _, raw := range bad {
 		calls := stubOpener(t, "linux")
@@ -114,6 +123,58 @@ func TestOpenURLUnsupportedOS(t *testing.T) {
 	}
 }
 
+// Unsafe query bytes arrive percent-encoded. Allowed bytes, including
+// the separators that give the query its meaning, pass through.
+func TestOpenURLEncodesQuery(t *testing.T) {
+	tests := []struct{ raw, want string }{
+		{"http://h/?q=a b", "http://h/?q=a%20b"},
+		{`http://h/?q="x"`, "http://h/?q=%22x%22"},
+		{"http://h/?q=`id`", "http://h/?q=%60id%60"},
+		{"http://h/?q=<b>", "http://h/?q=%3Cb%3E"},
+		{"http://h/?q=a|b", "http://h/?q=a%7Cb"},
+		{`http://h/?q=a\b`, "http://h/?q=a%5Cb"},
+		{"http://h/?q=a^b", "http://h/?q=a%5Eb"},
+		{"http://h/?q={x}", "http://h/?q=%7Bx%7D"},
+		{"http://h/?q=caf\u00e9", "http://h/?q=caf%C3%A9"},
+		{"http://h/?q=100%", "http://h/?q=100%25"},
+		{"http://h/?q=%zz", "http://h/?q=%25zz"},
+		{"http://h/?a=1&b=2;c=3", "http://h/?a=1&b=2;c=3"},
+		{"http://h/?q=%20", "http://h/?q=%20"},
+		{"http://h/?q=%2f%2F", "http://h/?q=%2f%2F"},
+		{"http://h/?r=/p?x:y@z!$'()*+,-._~", "http://h/?r=/p?x:y@z!$'()*+,-._~"},
+	}
+	for _, tt := range tests {
+		calls := stubOpener(t, "darwin")
+		if err := OpenURL(context.Background(), tt.raw); err != nil {
+			t.Errorf("OpenURL(%q) = %v", tt.raw, err)
+			continue
+		}
+		want := []call{{name: "open", args: []string{tt.want}}}
+		if !equalCalls(*calls, want) {
+			t.Errorf("OpenURL(%q) calls = %v, want %v", tt.raw, *calls, want)
+		}
+	}
+}
+
+// A failed opener that leaves ctx done stops the fallback.
+func TestOpenURLStopsWhenCtxDone(t *testing.T) {
+	stubOpener(t, "linux")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var names []string
+	runOpener = func(_ context.Context, name string, _ ...string) error {
+		names = append(names, name)
+		cancel()
+		return errors.New(name + " failed")
+	}
+	if err := OpenURL(ctx, "http://localhost:8080/"); err == nil {
+		t.Fatal("OpenURL = nil, want an error")
+	}
+	if want := []string{"xdg-open"}; !slices.Equal(names, want) {
+		t.Errorf("ran %v, want %v", names, want)
+	}
+}
+
 // Shell metacharacters stay inside the one URL argument.
 func TestOpenURLOneArgument(t *testing.T) {
 	calls := stubOpener(t, "darwin")
@@ -139,6 +200,45 @@ func TestRunOpenerReal(t *testing.T) {
 	}
 	if err := runOpener(context.Background(), "tilt-tui-no-such-opener"); !errors.Is(err, exec.ErrNotFound) {
 		t.Errorf("missing opener = %v, want exec.ErrNotFound", err)
+	}
+}
+
+// An opener that exits 0 but leaves a background child holding its
+// output returns within the wait delay. xdg-open does this when it hands
+// off to a browser.
+func TestRunOpenerReturnsWhenChildHoldsOutput(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "pid")
+	script := `sleep 5 & echo $! > "$0"; exit 0`
+	start := time.Now()
+	err := runOpener(context.Background(), "sh", "-c", script, pidFile)
+	elapsed := time.Since(start)
+	if b, readErr := os.ReadFile(pidFile); readErr == nil {
+		if pid, convErr := strconv.Atoi(strings.TrimSpace(string(b))); convErr == nil {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	} else {
+		t.Errorf("read sleep PID: %v", readErr)
+	}
+	if err != nil {
+		t.Errorf("runOpener = %v, want nil", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("runOpener took %s, want under 2s", elapsed)
+	}
+}
+
+// Trimmed output never ends in half a rune.
+func TestRunOpenerTrimsOutputOnRune(t *testing.T) {
+	out := strings.Repeat("a", 199) + "\u00e9"
+	err := runOpener(context.Background(), "sh", "-c", `printf '%s' "$0"; exit 1`, out)
+	if err == nil {
+		t.Fatal("runOpener = nil, want an error")
+	}
+	if !utf8.ValidString(err.Error()) {
+		t.Errorf("error %q is not valid UTF-8", err)
+	}
+	if !strings.HasSuffix(err.Error(), ": "+strings.Repeat("a", 199)) {
+		t.Errorf("error = %q, want the output trimmed to 199 bytes", err)
 	}
 }
 
