@@ -1,0 +1,45 @@
+# Buttons for the live test in internal/tilt/live_test.go. It uses
+# Tilt's built-in v1alpha1 module, so loading it needs no network. Run it
+# on a port other than 10350:
+#
+#   tilt up --port 10399 -f testdata/tiltfile/Tiltfile.buttons
+
+local_resource('buttons', cmd='echo built buttons', serve_cmd='while true; do sleep 60; done')
+
+location = v1alpha1.ui_component_location(component_id='buttons', component_type='Resource')
+
+# live-form has one input of each kind. The live test clicks it and reads
+# the values back from the button's status.
+v1alpha1.ui_button(
+    name='live-form',
+    location=location,
+    text='Live Form',
+    inputs=[
+        v1alpha1.ui_input_spec(name='msg', label='Message',
+                               text=v1alpha1.ui_text_input_spec(default_value='hello', placeholder='say something')),
+        v1alpha1.ui_input_spec(name='force', label='Force',
+                               bool=v1alpha1.ui_bool_input_spec(default_value=False)),
+        v1alpha1.ui_input_spec(name='env', label='Env',
+                               choice=v1alpha1.ui_choice_input_spec(choices=['dev', 'staging', 'prod'])),
+        v1alpha1.ui_input_spec(name='token',
+                               hidden=v1alpha1.ui_hidden_input_spec(value='s3cret')),
+    ],
+)
+
+# The click starts this command with each input as an environment
+# variable, so the values also show in the buttons resource's log.
+v1alpha1.cmd(
+    name='btn-live-form',
+    annotations={'tilt.dev/resource': 'buttons'},
+    args=['sh', '-c', 'echo "live-form msg=$msg force=$force env=$env token=$token"'],
+    start_on=v1alpha1.start_on_spec(ui_buttons=['live-form']),
+)
+
+# live-confirm requires confirmation in the UI. The API takes the click
+# without it.
+v1alpha1.ui_button(
+    name='live-confirm',
+    location=location,
+    text='Live Confirm',
+    requires_confirmation=True,
+)
