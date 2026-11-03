@@ -119,27 +119,92 @@ type K8sResourceInfo struct {
 	PodRestarts int    `json:"podRestarts"`
 }
 
-// Button is a UIButton. Decoded now so the store can hold them; the shell
-// does not render them yet.
+// Button is a UIButton.
 type Button struct {
-	Metadata ObjectMeta `json:"metadata"`
-	Spec     struct {
-		Location *struct {
-			ComponentID   string `json:"componentID"`
-			ComponentType string `json:"componentType"`
-		} `json:"location,omitempty"`
-		Text string `json:"text"`
-	} `json:"spec"`
+	Metadata ObjectMeta   `json:"metadata"`
+	Spec     ButtonSpec   `json:"spec"`
+	Status   ButtonStatus `json:"status"`
 }
 
-// LogList carries new log segments. Decoded but unused until the log store
-// lands.
+type ButtonSpec struct {
+	Location             *ButtonLocation `json:"location,omitempty"`
+	Text                 string          `json:"text"`
+	IconName             string          `json:"iconName,omitempty"`
+	Disabled             bool            `json:"disabled,omitempty"`
+	RequiresConfirmation bool            `json:"requiresConfirmation,omitempty"`
+	Inputs               []InputSpec     `json:"inputs,omitempty"`
+}
+
+type ButtonLocation struct {
+	ComponentID   string `json:"componentID"`
+	ComponentType string `json:"componentType"`
+}
+
+// InputSpec describes one button input. Exactly one of Text, Bool, Hidden
+// or Choice is set.
+type InputSpec struct {
+	Name   string           `json:"name"`
+	Label  string           `json:"label,omitempty"`
+	Text   *TextInputSpec   `json:"text,omitempty"`
+	Bool   *BoolInputSpec   `json:"bool,omitempty"`
+	Hidden *HiddenInputSpec `json:"hidden,omitempty"`
+	Choice *ChoiceInputSpec `json:"choice,omitempty"`
+}
+
+type TextInputSpec struct {
+	DefaultValue string `json:"defaultValue,omitempty"`
+	Placeholder  string `json:"placeholder,omitempty"`
+}
+
+type BoolInputSpec struct {
+	DefaultValue bool   `json:"defaultValue,omitempty"`
+	TrueString   string `json:"trueString,omitempty"`
+	FalseString  string `json:"falseString,omitempty"`
+}
+
+type HiddenInputSpec struct {
+	Value string `json:"value,omitempty"`
+}
+
+type ChoiceInputSpec struct {
+	Choices []string `json:"choices,omitempty"`
+}
+
+type ButtonStatus struct {
+	// LastClickedAt stays a string: Tilt requires exactly six fractional
+	// digits, which time.Time's JSON encoding doesn't guarantee.
+	LastClickedAt string        `json:"lastClickedAt,omitempty"`
+	Inputs        []InputStatus `json:"inputs,omitempty"`
+}
+
+// InputStatus is the value submitted for one input. Exactly one of Text,
+// Bool, Hidden or Choice is set.
+type InputStatus struct {
+	Name   string       `json:"name"`
+	Text   *StringValue `json:"text,omitempty"`
+	Bool   *BoolValue   `json:"bool,omitempty"`
+	Hidden *StringValue `json:"hidden,omitempty"`
+	Choice *StringValue `json:"choice,omitempty"`
+}
+
+type StringValue struct {
+	Value string `json:"value"`
+}
+
+type BoolValue struct {
+	Value bool `json:"value"`
+}
+
+// LogList carries new log segments.
 type LogList struct {
 	Segments []struct {
 		SpanID string    `json:"spanId,omitempty"`
 		Time   time.Time `json:"time"`
 		Text   string    `json:"text"`
 		Level  string    `json:"level,omitempty"`
+		// Fields carries progressID (and buildEvent). Without it, JSON
+		// decoding drops progressID and progress lines can't replace.
+		Fields map[string]string `json:"fields,omitempty"`
 	} `json:"segments,omitempty"`
 	Spans map[string]struct {
 		ManifestName string `json:"manifestName,omitempty"`

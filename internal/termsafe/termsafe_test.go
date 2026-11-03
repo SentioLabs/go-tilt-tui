@@ -1,11 +1,20 @@
-package ui
+package termsafe
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestSafe(t *testing.T) {
+// --- Contract assertions ---
+
+var (
+	_ func(string) string = Text
+	_ func(string) string = LogLine
+)
+
+// --- Behavior tests ---
+
+func TestText(t *testing.T) {
 	tests := []struct {
 		name, in, want string
 	}{
@@ -22,12 +31,12 @@ func TestSafe(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := safe(tt.in)
+			got := Text(tt.in)
 			if got != tt.want {
-				t.Errorf("safe(%q) = %q, want %q", tt.in, got, tt.want)
+				t.Errorf("Text(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 			if strings.ContainsRune(got, '\x1b') {
-				t.Errorf("safe(%q) still contains ESC", tt.in)
+				t.Errorf("Text(%q) still contains ESC", tt.in)
 			}
 		})
 	}

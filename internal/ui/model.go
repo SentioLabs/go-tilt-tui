@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sentiolabs/go-tilt-tui/internal/termsafe"
 	"github.com/sentiolabs/go-tilt-tui/internal/tilt"
 )
 
@@ -203,7 +204,7 @@ func (m Model) render() string {
 
 	nameW := 12
 	for _, r := range m.rows {
-		nameW = max(nameW, ansi.StringWidth(safe(r.Name())))
+		nameW = max(nameW, ansi.StringWidth(termsafe.Text(r.Name())))
 	}
 	nameW = min(nameW, m.width/2)
 
@@ -217,10 +218,10 @@ func (m Model) render() string {
 		st := r.Combined()
 		line := fmt.Sprintf(" %s %-*s  %-8s  %-8s  %s",
 			statusDot[st].Render("●"),
-			nameW, ansi.Truncate(safe(r.Name()), nameW, "…"),
-			safe(r.Kind()),
+			nameW, ansi.Truncate(termsafe.Text(r.Name()), nameW, "…"),
+			termsafe.Text(r.Kind()),
 			st,
-			safe(firstLine(r.LastBuildError())),
+			termsafe.Text(firstLine(r.LastBuildError())),
 		)
 		line = ansi.Truncate(line, m.width, "…")
 		if i == m.cursor {
@@ -248,12 +249,12 @@ func (m Model) header() string {
 	case connDown:
 		conn = statusDot[tilt.StatusUnhealthy].Render("● disconnected")
 		if m.connErr != nil {
-			conn += " " + styleErrText.Render(safe(m.connErr.Error()))
+			conn += " " + styleErrText.Render(termsafe.Text(m.connErr.Error()))
 		}
 	}
 	h := fmt.Sprintf("%s  %s  %s", styleTitle.Render("tilt-tui"), styleDim.Render(m.addr), conn)
 	if tf := m.store.TiltfilePath(); tf != "" {
-		h += "  " + styleDim.Render(safe(tf))
+		h += "  " + styleDim.Render(termsafe.Text(tf))
 	}
 	return ansi.Truncate(h, m.width, "…")
 }
@@ -261,7 +262,7 @@ func (m Model) header() string {
 func (m Model) footer() string {
 	f := "↑/↓ move  r trigger  q quit"
 	if m.flash != "" {
-		f = safe(m.flash) + "  ·  " + f
+		f = termsafe.Text(m.flash) + "  ·  " + f
 	}
 	return styleDim.Render(ansi.Truncate(f, m.width, "…"))
 }

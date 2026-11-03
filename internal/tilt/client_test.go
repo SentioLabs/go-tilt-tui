@@ -87,7 +87,7 @@ func newFake(t *testing.T, messages ...string) (*fakeTilt, *Client) {
 		t.Fatal(err)
 	}
 	port, _ := strconv.Atoi(portStr)
-	c, err := New(host, port)
+	c, err := New(host, port, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,3 +148,12 @@ func TestTriggerSendsManifestName(t *testing.T) {
 		t.Errorf("build_reason = %v", body["build_reason"])
 	}
 }
+
+// --- Contract assertions ---
+
+var (
+	_ func(string, int, Options) (*Client, error)                            = New
+	_ func(*Client, context.Context) error                                   = (*Client).CheckHost
+	_ func(*Client, context.Context) (map[string][]string, error)            = (*Client).ResourceDependencies
+	_ func(*Client, context.Context, Button, map[string]any) (Button, error) = (*Client).ClickButton
+)

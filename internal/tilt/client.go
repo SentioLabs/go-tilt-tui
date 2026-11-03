@@ -38,15 +38,32 @@ const (
 // the same value so the Tilt UI labels the build as a manual trigger.
 const buildReasonCLI = 16
 
+// Options configures New.
+type Options struct {
+	// AllowRemote permits connecting to non-loopback addresses. Without it,
+	// the client's dialer refuses any connection whose resolved IP is not
+	// in 127.0.0.0/8 or ::1, on every dial.
+	AllowRemote bool
+}
+
+// ErrRemoteHost is returned when a dial resolves to a non-loopback IP and
+// Options.AllowRemote is false.
+var ErrRemoteHost = errors.New("tilt: refusing non-loopback host without --allow-remote")
+
+// ErrTooLarge means a response passed its size limit. Responses are never
+// silently truncated.
+var ErrTooLarge = errors.New("tilt: response larger than its limit")
+
 // Client talks to one Tilt HUD server. It never shells out and never
 // contacts anything other than the configured host:port.
 type Client struct {
 	base *url.URL
 	http *http.Client
+	opts Options
 }
 
 // New returns a client for the Tilt server at host:port.
-func New(host string, port int) (*Client, error) {
+func New(host string, port int, opts Options) (*Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, err
@@ -57,8 +74,14 @@ func New(host string, port int) (*Client, error) {
 		// No client-wide Timeout: it would also cap the long-lived
 		// WebSocket. Each plain request gets its own context deadline.
 		http: &http.Client{Jar: jar},
+		opts: opts,
 	}, nil
 }
+
+// CheckHost resolves the host and returns an error wrapping ErrRemoteHost,
+// with an `ssh -L` hint, when it isn't loopback and AllowRemote is false.
+// It sends no request. main calls it once before starting the UI.
+func (c *Client) CheckHost(ctx context.Context) error { panic("T0 stub") }
 
 // Addr returns host:port for display.
 func (c *Client) Addr() string { return c.base.Host }

@@ -27,7 +27,7 @@ func run() error {
 	port := flag.Int("port", defaultPort(), "Tilt API port (default from $TILT_PORT, else 10350)")
 	flag.Parse()
 
-	client, err := tilt.New(*host, *port)
+	client, err := tilt.New(*host, *port, tilt.Options{})
 	if err != nil {
 		return err
 	}
