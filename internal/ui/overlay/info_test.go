@@ -281,3 +281,43 @@ func TestInfoCloses(t *testing.T) {
 		t.Fatal("x returned a command")
 	}
 }
+
+func TestInfoKindRow(t *testing.T) {
+	var bare tilt.Resource
+	bare.Metadata.Name = "bare"
+	for _, l := range infoLines(NewInfo(infoTheme(t), bare)) {
+		if strings.HasPrefix(l, "kind") {
+			t.Fatalf("kind row %q shown for a resource with no kind", l)
+		}
+	}
+	if lines := infoLines(NewInfo(infoTheme(t), infoResource("api"))); !slices.Contains(lines, "kind        local") {
+		t.Fatalf("no kind row in %q", lines)
+	}
+}
+
+func TestInfoPodRestarts(t *testing.T) {
+	for _, tc := range []struct {
+		restarts int
+		want     string
+	}{
+		{0, "pod         api-7d9 · Running · 0 restarts"},
+		{1, "pod         api-7d9 · Running · 1 restart"},
+		{2, "pod         api-7d9 · Running · 2 restarts"},
+	} {
+		r := infoResource("api")
+		r.Status.K8sResourceInfo.PodRestarts = tc.restarts
+		if lines := infoLines(NewInfo(infoTheme(t), r)); !slices.Contains(lines, tc.want) {
+			t.Errorf("PodRestarts %d: no %q row in %q", tc.restarts, tc.want, lines)
+		}
+	}
+}
+
+func TestInfoSelfDependency(t *testing.T) {
+	i := NewInfo(infoTheme(t), infoResource("a"))
+	i.SetDeps(map[string][]string{"a": {"a"}}, nil)
+	got := infoAfter(t, infoLines(i), "depends on")
+	want := []string{"  └─ a (cycle)", "used by", "  a"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("tree = %q, want %q", got, want)
+	}
+}

@@ -93,7 +93,9 @@ func (i *Info) lines() []string {
 		lines = append(lines, label+strings.Repeat(" ", infoLabelW-len(label))+"  "+value)
 	}
 
-	row("kind", termsafe.Text(r.Kind()))
+	if kind := termsafe.Text(r.Kind()); kind != "" {
+		row("kind", kind)
+	}
 	st := r.Combined()
 	row("status", i.th.Status[st].Render("●")+" "+st.String())
 	if r.HasWarning() {
@@ -121,7 +123,11 @@ func (i *Info) lines() []string {
 		row("link", value)
 	}
 	if k := r.Status.K8sResourceInfo; k != nil {
-		row("pod", fmt.Sprintf("%s · %s · %d restarts", termsafe.Text(k.PodName), termsafe.Text(k.PodStatus), k.PodRestarts))
+		restarts := "restarts"
+		if k.PodRestarts == 1 {
+			restarts = "restart"
+		}
+		row("pod", fmt.Sprintf("%s · %s · %d %s", termsafe.Text(k.PodName), termsafe.Text(k.PodStatus), k.PodRestarts, restarts))
 	}
 	if e := r.LastBuildError(); e != "" {
 		first, _, _ := strings.Cut(e, "\n")

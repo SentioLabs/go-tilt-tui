@@ -7,8 +7,8 @@
 │▼ ungrouped (1)                         ││                                                                                               ┃│
 │  ●  (Tiltfile)                         ││                                                                                               ┃│
 │                                        ││                                                                                               ┃│
+│                                        ││                                                                                               ┃│
 │                                        ││                ╭─ Info · api ──────╮                                                          ┃│
-│                                        ││                │kind               │                                                          ┃│
 │                                        ││                │status      ● error│                                                          ┃│
 │                                        ││                │last error  boom   │                                                          ┃│
 │                                        ││                │                   │                                                          ┃│
