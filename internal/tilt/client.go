@@ -154,9 +154,21 @@ func (c *Client) doLimit(ctx context.Context, method, path string, body []byte, 
 		return nil, fmt.Errorf("%s %s: %w (limit %d bytes)", method, path, ErrTooLarge, limit)
 	}
 	if resp.StatusCode/100 != 2 {
-		return nil, fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(out)))
+		return nil, &statusError{method: method, path: path, code: resp.StatusCode, status: resp.Status, body: strings.TrimSpace(string(out))}
 	}
 	return out, nil
+}
+
+// statusError is a non-2xx response. Its text is the same as before it
+// had a type. ClickButton reads code to spot a 409.
+type statusError struct {
+	method, path string
+	code         int
+	status, body string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("%s %s: %s: %s", e.method, e.path, e.status, e.body)
 }
 
 // Watch connects to /ws/view and calls fn for every message until ctx is
