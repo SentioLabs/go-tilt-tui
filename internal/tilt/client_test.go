@@ -3,6 +3,7 @@ package tilt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -146,6 +147,25 @@ func TestTriggerSendsManifestName(t *testing.T) {
 	}
 	if body["build_reason"] != float64(buildReasonCLI) {
 		t.Errorf("build_reason = %v", body["build_reason"])
+	}
+}
+
+func TestDoRefusesOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, defaultMaxBody+1))
+	}))
+	defer srv.Close()
+	host, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	p, _ := strconv.Atoi(port)
+	c, err := New(host, p, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.do(context.Background(), http.MethodGet, "/big", nil); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("do = %v, want ErrTooLarge", err)
+	}
+	if out, err := c.doLimit(context.Background(), http.MethodGet, "/big", nil, defaultMaxBody+1); err != nil || len(out) != defaultMaxBody+1 {
+		t.Fatalf("doLimit at exact size: len=%d err=%v", len(out), err)
 	}
 }
 

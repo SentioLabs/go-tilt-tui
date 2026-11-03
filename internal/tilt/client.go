@@ -73,7 +73,7 @@ func New(host string, port int, opts Options) (*Client, error) {
 		base: base,
 		// No client-wide Timeout: it would also cap the long-lived
 		// WebSocket. Each plain request gets its own context deadline.
-		http: &http.Client{Jar: jar},
+		http: &http.Client{Jar: jar, Transport: newTransport(opts.AllowRemote)},
 		opts: opts,
 	}, nil
 }
@@ -81,7 +81,14 @@ func New(host string, port int, opts Options) (*Client, error) {
 // CheckHost resolves the host and returns an error wrapping ErrRemoteHost,
 // with an `ssh -L` hint, when it isn't loopback and AllowRemote is false.
 // It sends no request. main calls it once before starting the UI.
-func (c *Client) CheckHost(ctx context.Context) error { panic("T0 stub") }
+func (c *Client) CheckHost(ctx context.Context) error {
+	port, err := strconv.Atoi(c.base.Port())
+	if err != nil {
+		return err
+	}
+	_, err = resolveAllowed(ctx, c.base.Hostname(), port, c.opts.AllowRemote)
+	return err
+}
 
 // Addr returns host:port for display.
 func (c *Client) Addr() string { return c.base.Host }
@@ -109,8 +116,17 @@ func (c *Client) hasSession() bool {
 	return false
 }
 
-// do runs one bounded HTTP request and returns the body (capped at 1 MiB).
+// defaultMaxBody bounds ordinary API responses.
+const defaultMaxBody = 1 << 20
+
+// do runs one bounded HTTP request with the default body limit.
 func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return c.doLimit(ctx, method, path, body, defaultMaxBody)
+}
+
+// doLimit runs one bounded HTTP request. A body longer than limit returns
+// ErrTooLarge. It never returns a truncated body.
+func (c *Client) doLimit(ctx context.Context, method, path string, body []byte, limit int64) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
@@ -130,9 +146,12 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		return nil, err
 	}
 	defer resp.Body.Close()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	out, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(out)) > limit {
+		return nil, fmt.Errorf("%s %s: %w (limit %d bytes)", method, path, ErrTooLarge, limit)
 	}
 	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(out)))
