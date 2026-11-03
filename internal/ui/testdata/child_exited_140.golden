@@ -1,0 +1,20 @@
+╭─ Resources  ✗ 1  ✓ 2/3 ────────────────╮╭─ tilt stderr · x shows logs ───────────────────────────────────────────────────────────────────╮
+│All Resources                           ││Loading Tiltfile at: /src/Tiltfile                                                              │
+│▼ backend (1)                           ││Error: Tiltfile:3: undefined: local_resorce                                                     │
+│  ●  api                 11m ago · 11.4s││                                                                                                │
+│▼ frontend (1)                          ││                                                                                                │
+│  ●  web                                ││                                                                                                │
+│▼ ungrouped (1)                         ││                                                                                                │
+│  ●  (Tiltfile)                         ││                                                                                                │
+│                                        ││                                                                                                │
+│                                        ││                                                                                                │
+│                                        ││                                                                                                │
+│                                        ││                                                                                                │
+│                                        ││                                                                                                │
+│                                        ││                                                                                                │
+│                                        ││                                                                                                │
+│                                        ││                                                                                                │
+│● tilt exited (code 1)  localhost:10350 ││                                                                                                │
+│13m 21s                                 ││                                                                                                │
+╰────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────────────────────────────────────╯
+ r trigger · x stderr · tab switch · ? help · q quit

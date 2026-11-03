@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -31,10 +32,13 @@ func main() {
 }
 
 func run() error {
-	host := flag.String("host", tilt.DefaultHost, "Tilt API host")
-	port := flag.Int("port", defaultPort(), "Tilt API port (default from $TILT_PORT, else 10350)")
-	allowRemote := flag.Bool("allow-remote", false, "allow a non-loopback --host; Tilt's tokens then travel unencrypted")
-	flag.Parse()
+	opts, err := parseFlags(os.Args[1:], os.Stderr)
+	if errors.Is(err, flag.ErrHelp) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 
 	dir, err := config.Dir()
 	if err != nil {
@@ -46,7 +50,7 @@ func run() error {
 	}
 	th, themeWarning := theme.Select(loaded.Config.Theme)
 
-	client, err := tilt.New(*host, *port, tilt.Options{AllowRemote: *allowRemote})
+	client, err := tilt.New(opts.host, opts.port, tilt.Options{AllowRemote: opts.allowRemote})
 	if err != nil {
 		return err
 	}
@@ -55,6 +59,21 @@ func run() error {
 	cancelCheck()
 	if err != nil {
 		return err
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var sup *supervisor
+	if opts.up {
+		if err := checkPortFree(opts.host, opts.port); err != nil {
+			return err
+		}
+		t, err := proc.FindTilt(loaded.Config.TiltBinaryPath)
+		if err != nil {
+			return err
+		}
+		sup = &supervisor{ctx: ctx, start: tiltStarter(t), port: opts.port, args: opts.tiltArgs}
 	}
 
 	logs := logstore.New(logstore.Options{
@@ -71,20 +90,36 @@ func run() error {
 		filterNames = append(filterNames, f.Name)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	p := tea.NewProgram(ui.New(ui.Deps{
 		Client:  client,
 		Addr:    client.Addr(),
 		Theme:   th,
 		Logs:    logs,
 		Filters: filterNames,
-		Remote:  *allowRemote,
+		Remote:  opts.allowRemote,
 		Flash:   strings.Join(warnings, " · "),
 		Open:    proc.OpenURL,
-	}))
-	go watch(ctx, client, p)
+	}), programOptions(sup)...)
+	loop := &watchLoop{run: func(ctx context.Context) { watch(ctx, client, p) }}
+
+	if sup == nil {
+		loop.Start(ctx)
+	} else {
+		sup.send, sup.watch = p.Send, loop
+		// launch waits out tilt's startup window before the TUI takes
+		// the screen, so an early failure prints as a plain error.
+		// Its text holds tilt's stderr, so it is made safe first.
+		if err := sup.launch(); err != nil {
+			return safeStartError(err)
+		}
+		// Deferred after cancel, so it runs first: the child gets
+		// SIGTERM and its grace period before anything else ends.
+		defer func() {
+			if err := sup.Close(); err != nil {
+				fmt.Fprintln(os.Stderr, "tilt-tui: stopping tilt:", err)
+			}
+		}()
+	}
 
 	_, err = p.Run()
 	return err
@@ -110,7 +145,8 @@ func hide(filters []config.Filter) func(string) bool {
 }
 
 // watch keeps a /ws/view connection open, reconnecting after drops so the
-// UI survives `tilt down && tilt up` without a restart.
+// UI survives `tilt down && tilt up` without a restart. It returns when
+// ctx ends. Under --up the supervisor cancels it when the child exits.
 func watch(ctx context.Context, c *tilt.Client, p *tea.Program) {
 	const retryEvery = 2 * time.Second
 	for {
