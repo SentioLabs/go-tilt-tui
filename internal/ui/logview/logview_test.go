@@ -220,6 +220,37 @@ func TestResetClearsWrapCache(t *testing.T) {
 	}
 }
 
+func TestResetClearsAnchor(t *testing.T) {
+	s, m := setup(t)
+	rows(m, 40, 5)
+	m.HandleKey(key("g"))
+	for range 10 {
+		m.HandleKey(key("pgdown"))
+	}
+	want(t, rows(m, 40, 5), numbered(41, 45)...)
+	feed(t, s, true) // Tilt restart: empty snapshot
+	want(t, rows(m, 40, 5), "no logs yet", "", "", "", "")
+	m.HandleKey(key("k"))
+	feed(t, s, false, numbered(1, 3)...)
+	want(t, rows(m, 40, 5), "line 1", "line 2", "line 3", "", "")
+}
+
+func TestEvictedAnchorMovesToNextLine(t *testing.T) {
+	s := logstore.New(logstore.Options{MaxBytesPerResource: 450})
+	feed(t, s, true, strings.Repeat("x", 25), strings.Repeat("y", 25), "line 3")
+	m := New(s, mono(t))
+	m.SetSource(logstore.Source{All: true}, "")
+	rows(m, 11, 2)
+	m.HandleKey(key("g"))
+	m.HandleKey(key("j"))
+	want(t, rows(m, 11, 2), "↳ xxxxxxxx", "↳ xxxxxxx")
+	feed(t, s, false, numbered(4, 7)...) // evicts the x line
+	want(t, rows(m, 11, 2), "yyyyyyyyyy", "↳ yyyyyyyy")
+	if m.topRow != 0 {
+		t.Fatalf("topRow = %d, want 0", m.topRow)
+	}
+}
+
 func TestTimestamps(t *testing.T) {
 	s := logstore.New(logstore.Options{})
 	feed(t, s, true, "hello")

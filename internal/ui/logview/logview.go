@@ -216,6 +216,7 @@ func (m *Model) View(w, h int, focused bool) string {
 		m.resets = r
 		clear(m.cache)
 		m.follow = true
+		m.top, m.topRow = 0, 0
 	}
 	m.lastW, m.lastH = max(0, w-1), h
 
