@@ -180,7 +180,8 @@ type supervisor struct {
 	child     child // the running child, nil once it exits
 	launching bool  // a launch is waiting for start
 	closed    bool
-	launches  sync.WaitGroup // Close waits for launches in flight
+	launches  sync.WaitGroup     // Close waits for launches in flight
+	stopStart context.CancelFunc // ends the launch in flight, nil when none
 }
 
 // upOptions lets other files in package main add program options under
@@ -212,13 +213,17 @@ func (s *supervisor) launch() error {
 	}
 	s.launching = true
 	s.launches.Add(1)
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+	s.stopStart = cancel
 	s.mu.Unlock()
 	defer s.launches.Done()
 
-	c, err := s.start(s.ctx, s.port, s.args)
+	c, err := s.start(ctx, s.port, s.args)
 
 	s.mu.Lock()
 	s.launching = false
+	s.stopStart = nil
 	closed := s.closed
 	if err == nil && !closed {
 		s.child = c
@@ -260,11 +265,15 @@ func (s *supervisor) supervise(c child) {
 	s.send(ui.ChildExitedMsg{Code: exitCode(c.ExitErr()), Stderr: c.StderrTail()})
 }
 
-// Close stops the reconnect loop, waits for a launch in flight and stops
-// the child: SIGTERM, then SIGKILL after upGrace. main calls it on quit.
+// Close stops the reconnect loop, cancels a launch in flight and waits
+// for it, then stops the child: SIGTERM, then SIGKILL after upGrace. main
+// calls it on quit.
 func (s *supervisor) Close() error {
 	s.mu.Lock()
 	s.closed = true
+	if s.stopStart != nil {
+		s.stopStart()
+	}
 	s.mu.Unlock()
 	s.watch.Stop()
 	s.launches.Wait()
