@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -231,6 +232,39 @@ func TestDisabledToggleAndStickySelection(t *testing.T) {
 			t.Fatalf("hidden row still shown after cursor left: %q", row)
 		}
 	}
+}
+
+// sgrParams returns the parameters of the SGR sequence that opens row.
+func sgrParams(row string) []string {
+	rest, ok := strings.CutPrefix(row, "\x1b[")
+	if !ok {
+		return nil
+	}
+	params, _, _ := strings.Cut(rest, "m")
+	return strings.Split(params, ";")
+}
+
+func TestFocusedCursorKeepsDim(t *testing.T) {
+	st := th(t)
+	st.Dim = lipgloss.NewStyle().Faint(true)
+	st.Selected = lipgloss.NewStyle().Reverse(true)
+	m := New(st)
+	m.SetResources([]tilt.Resource{res("a"), res("off", disabled()), res("z")})
+	m.HandleKey(key("j"))
+	m.HandleKey(key("j")) // off
+	check := func(name string) {
+		t.Helper()
+		row := strings.Split(m.View(30, 4, true, now), "\n")[2]
+		got := sgrParams(row)
+		for _, want := range []string{"2", "7"} {
+			if !slices.Contains(got, want) {
+				t.Fatalf("%s cursor row %q lacks SGR %s", name, row, want)
+			}
+		}
+	}
+	check("disabled")
+	m.HandleKey(key("d"))
+	check("filtered")
 }
 
 func TestCollapseUnpinsFilteredRow(t *testing.T) {

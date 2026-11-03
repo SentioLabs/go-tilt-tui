@@ -333,6 +333,7 @@ func (m *Model) renderRow(ri, w int, focused bool, now time.Time) string {
 	r := m.rows[ri]
 	selected := ri == m.cursor
 	var text, styled string
+	dim := false
 	switch r.kind {
 	case rowAll:
 		text = ansi.Truncate("All Resources", w, "…")
@@ -341,16 +342,22 @@ func (m *Model) renderRow(ri, w int, focused bool, now time.Time) string {
 		text = ansi.Truncate(m.headerText(r.group), w, "…")
 		styled = text
 	case rowResource:
-		text, styled = m.resourceRow(m.resources[r.res], w, now)
+		res := m.resources[r.res]
+		text, styled = m.resourceRow(res, w, now)
+		dim = res.IsDisabled() || !m.visible(res)
 	}
 	if !selected {
 		return styled
 	}
+	sel := m.th.Selected
+	if dim {
+		sel = sel.Inherit(m.th.Dim)
+	}
 	if focused {
 		text += strings.Repeat(" ", max(0, w-ansi.StringWidth(text)))
-		return m.th.Selected.Render(text)
+		return sel.Render(text)
 	}
-	return m.th.Selected.Faint(true).Render(text)
+	return sel.Faint(true).Render(text)
 }
 
 func (m *Model) headerText(name string) string {
