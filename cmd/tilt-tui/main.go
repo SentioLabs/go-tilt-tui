@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -74,12 +75,18 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// findTilt resolves the tilt binary once, on first use. --up needs
+	// it at startup; the file-watch panel needs it only when opened.
+	findTilt := sync.OnceValues(func() (proc.Tilt, error) {
+		return proc.FindTilt(loaded.Config.TiltBinaryPath)
+	})
+
 	var sup *supervisor
 	if opts.up {
 		if err := checkPortFree(opts.host, opts.port); err != nil {
 			return err
 		}
-		t, err := proc.FindTilt(loaded.Config.TiltBinaryPath)
+		t, err := findTilt()
 		if err != nil {
 			return err
 		}
@@ -107,14 +114,16 @@ func run() error {
 	}
 
 	p := tea.NewProgram(ui.New(ui.Deps{
-		Client:  client,
-		Addr:    client.Addr(),
-		Theme:   th,
-		Logs:    logs,
-		Filters: filterNames,
-		Remote:  opts.allowRemote,
-		Flash:   strings.Join(warnings, " · "),
-		Open:    proc.OpenURL,
+		Client:       client,
+		Addr:         client.Addr(),
+		Theme:        th,
+		Logs:         logs,
+		Filters:      filterNames,
+		Remote:       opts.allowRemote,
+		Flash:        strings.Join(warnings, " · "),
+		Open:         proc.OpenURL,
+		Dependencies: client.ResourceDependencies,
+		FileWatches:  fileWatches(opts.allowRemote, opts.port, findTilt),
 	}), programOptions(sup)...)
 	loop := &watchLoop{run: func(ctx context.Context) { watch(ctx, client, p) }}
 
