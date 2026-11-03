@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os/exec"
 	"path/filepath"
 )
@@ -28,6 +29,11 @@ func FindTilt(override string) (Tilt, error) {
 	path, err := exec.LookPath(name)
 	if err != nil && !errors.Is(err, exec.ErrDot) {
 		if override != "" {
+			// LookPath reports a missing slash path as fs.ErrNotExist.
+			// Callers test for exec.ErrNotFound either way.
+			if errors.Is(err, fs.ErrNotExist) {
+				return Tilt{}, fmt.Errorf("tiltBinaryPath %q: %w: %w", override, exec.ErrNotFound, err)
+			}
 			return Tilt{}, fmt.Errorf("tiltBinaryPath %q: %w", override, err)
 		}
 		return Tilt{}, fmt.Errorf("find tilt: %w (install tilt or set tiltBinaryPath)", err)

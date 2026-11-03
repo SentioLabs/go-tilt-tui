@@ -52,17 +52,49 @@ func shortStartup(t *testing.T) {
 	t.Cleanup(func() { startupWindow = old })
 }
 
-// gone waits up to 3 s for pid to vanish. An exited process can linger
-// as a zombie until its new parent reaps it, so it polls.
+// gone waits up to 3 s for pid to vanish or become a zombie. kill(pid, 0)
+// succeeds on a zombie, and in a container whose PID 1 doesn't reap, a
+// reparented grandchild stays one forever.
 func gone(pid int) bool {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) || zombie(pid) {
 			return true
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	return false
+}
+
+// zombie reports whether /proc shows pid in state Z. It is false where
+// there is no /proc, such as macOS.
+func zombie(pid int) bool {
+	data, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return false
+	}
+	// The line is "pid (comm) state ...". comm may hold ")", so the
+	// state follows the last one.
+	s := string(data)
+	fields := strings.Fields(s[strings.LastIndexByte(s, ')')+1:])
+	return len(fields) > 0 && fields[0] == "Z"
+}
+
+// An exited child the test has not reaped is a zombie. gone counts it
+// as gone, because a reparented grandchild can stay a zombie when PID 1
+// doesn't reap.
+func TestGoneSeesZombie(t *testing.T) {
+	if _, err := os.Stat("/proc"); err != nil {
+		t.Skip("no /proc")
+	}
+	cmd := exec.Command("true")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Wait()
+	if !gone(cmd.Process.Pid) {
+		t.Errorf("gone(zombie pid %d) = false", cmd.Process.Pid)
+	}
 }
 
 // pidFromFile reads a pid the fake wrote, waiting for the file to appear.
@@ -122,6 +154,18 @@ func TestFindTiltMissing(t *testing.T) {
 	}
 }
 
+// A missing override wraps exec.ErrNotFound like a missing tilt on PATH.
+func TestFindTiltOverrideMissing(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing", "tilt")
+	_, err := FindTilt(missing)
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("FindTilt(%q) = %v, want exec.ErrNotFound", missing, err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "tiltBinaryPath") {
+		t.Errorf("FindTilt(%q) = %v, want a tiltBinaryPath error", missing, err)
+	}
+}
+
 // A tilt in the current directory reached through "." on PATH is refused.
 func TestFindTiltRefusesDotPath(t *testing.T) {
 	bin := fakeTilt(t, "exit 0")
@@ -158,6 +202,25 @@ func TestUpFastExitReturnsStderr(t *testing.T) {
 	}
 	if d := time.Since(start); d >= startupWindow {
 		t.Errorf("Up took %v, want it to return as soon as tilt exits", d)
+	}
+}
+
+// tilt starts a child in its group and then fails at startup. Up kills
+// the child too.
+func TestUpFastExitKillsGroup(t *testing.T) {
+	shortStartup(t)
+	pidFile := filepath.Join(t.TempDir(), "grandchild")
+	bin := fakeTilt(t, `sleep 60 </dev/null >/dev/null 2>&1 &
+echo $! > "`+pidFile+`"
+exit 3`)
+	c, err := Tilt{Binary: bin}.Up(context.Background(), testPort, nil)
+	if err == nil {
+		c.Stop(time.Second)
+		t.Fatal("Up = nil error for a tilt that exits at once")
+	}
+	if grandchild := pidFromFile(t, pidFile); !gone(grandchild) {
+		syscall.Kill(grandchild, syscall.SIGKILL)
+		t.Errorf("grandchild pid %d survived a failed Up", grandchild)
 	}
 }
 
@@ -312,6 +375,66 @@ func TestDoneClosesWhenTiltExitsLater(t *testing.T) {
 	}
 	if err := c.Stop(time.Second); err != nil {
 		t.Errorf("Stop after exit = %v", err)
+	}
+}
+
+// tilt exits on its own after startup and leaves a child in its group.
+// Stop still kills the child.
+func TestStopAfterExitKillsGroup(t *testing.T) {
+	shortStartup(t)
+	pidFile := filepath.Join(t.TempDir(), "grandchild")
+	bin := fakeTilt(t, `sleep 60 </dev/null >/dev/null 2>&1 &
+echo $! > "`+pidFile+`"
+sleep 0.6
+exit 0`)
+	c, err := Tilt{Binary: bin}.Up(context.Background(), testPort, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild := pidFromFile(t, pidFile)
+	select {
+	case <-c.Done():
+	case <-time.After(5 * time.Second):
+		c.Stop(time.Second)
+		t.Fatal("Done never closed")
+	}
+	if err := c.Stop(time.Second); err != nil {
+		t.Errorf("Stop after exit = %v", err)
+	}
+	if !gone(grandchild) {
+		syscall.Kill(grandchild, syscall.SIGKILL)
+		t.Errorf("grandchild pid %d survived Stop", grandchild)
+	}
+}
+
+// tilt exits 0 on SIGTERM, but a child that ignores SIGTERM still holds
+// tilt's stderr. Wait gives up after waitDelay. That is still a clean
+// exit, so ExitErr is nil.
+func TestStopCleanExitWithHeldStderr(t *testing.T) {
+	shortStartup(t)
+	pidFile := filepath.Join(t.TempDir(), "grandchild")
+	bin := fakeTilt(t, `(trap '' TERM; exec sleep 60) &
+echo $! > "`+pidFile+`"
+trap 'exit 0' TERM
+while :; do sleep 0.05; done`)
+	c, err := Tilt{Binary: bin}.Up(context.Background(), testPort, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild := pidFromFile(t, pidFile)
+	start := time.Now()
+	if err := c.Stop(5 * time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("Stop took %v, want about waitDelay", d)
+	}
+	if err := c.ExitErr(); err != nil {
+		t.Errorf("ExitErr = %v, want nil for a tilt that exited 0", err)
+	}
+	if !gone(grandchild) {
+		syscall.Kill(grandchild, syscall.SIGKILL)
+		t.Errorf("grandchild pid %d survived Stop", grandchild)
 	}
 }
 
