@@ -183,21 +183,33 @@ func liveCtx(t *testing.T) context.Context {
 
 func TestLiveTrigger(t *testing.T) {
 	lt := liveConnect(t)
-	lt.waitFor(t, "the first build of "+liveResource, func(s *Store, _ string) bool {
+	// Wait until no build is in flight, so the build the trigger starts is
+	// the only one that can start after last.
+	lt.waitFor(t, "an idle "+liveResource+" with a finished build", func(s *Store, _ string) bool {
 		r, ok := lt.resourceLocked(s, liveResource)
-		return ok && len(r.Status.BuildHistory) > 0 && r.Status.BuildHistory[0].FinishTime != nil
+		if !ok || len(r.Status.BuildHistory) == 0 || r.Status.BuildHistory[0].FinishTime == nil {
+			return false
+		}
+		st := r.Status
+		return st.PendingBuildSince == nil && st.UpdateStatus != UpdatePending && st.UpdateStatus != UpdateInProgress
 	})
-	before := time.Now()
+	lt.mu.Lock()
+	r, _ := lt.resourceLocked(lt.store, liveResource)
+	last := r.Status.BuildHistory[0].StartTime
+	lt.mu.Unlock()
+	if last == nil {
+		t.Fatalf("the last build of %s has no start time", liveResource)
+	}
 	if err := lt.client.Trigger(liveCtx(t), liveResource); err != nil {
 		t.Fatal(err)
 	}
-	lt.waitFor(t, "a build that started after the trigger", func(s *Store, _ string) bool {
+	lt.waitFor(t, "a build that started after "+last.Format(time.RFC3339Nano), func(s *Store, _ string) bool {
 		r, ok := lt.resourceLocked(s, liveResource)
 		if !ok || len(r.Status.BuildHistory) == 0 {
 			return false
 		}
 		st := r.Status.BuildHistory[0].StartTime
-		return st != nil && st.After(before.Add(-time.Second))
+		return st != nil && st.After(*last)
 	})
 }
 
@@ -221,7 +233,7 @@ func TestLiveClickButtonEachInput(t *testing.T) {
 		{"text", "msg", "typed in the live test"},
 		{"bool", "force", true},
 		{"choice", "env", "prod"},
-		{"hidden", "token", "s3cret"},
+		{"hidden", "token", "live-hidden-token"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -251,7 +263,13 @@ func TestLiveClickButtonEachInput(t *testing.T) {
 func TestLiveClickButtonAllInputs(t *testing.T) {
 	lt := liveConnect(t)
 	b := lt.button(t, liveForm)
-	want := map[string]any{"msg": "all at once", "force": false, "env": "staging", "token": "s3cret"}
+	// The nonce keeps a log line from an earlier run from matching.
+	msg := "all at once " + strconv.FormatInt(time.Now().UnixNano(), 36)
+	want := map[string]any{"msg": msg, "force": false, "env": "staging", "token": "s3cret"}
+	line := "live-form msg=" + msg + " force=false env=staging token=s3cret"
+	lt.mu.Lock()
+	start := lt.logs.Len()
+	lt.mu.Unlock()
 	if _, err := lt.client.ClickButton(liveCtx(t), b, want); err != nil {
 		t.Fatalf("ClickButton: %v", err)
 	}
@@ -268,8 +286,8 @@ func TestLiveClickButtonAllInputs(t *testing.T) {
 		return true
 	})
 	// The click starts btn-live-form, which echoes the values it got.
-	lt.waitFor(t, "the btn-live-form log line", func(_ *Store, logs string) bool {
-		return strings.Contains(logs, "live-form msg=all at once force=false env=staging token=s3cret")
+	lt.waitFor(t, "the btn-live-form log line "+strconv.Quote(line), func(_ *Store, logs string) bool {
+		return strings.Contains(logs[start:], line)
 	})
 }
 
