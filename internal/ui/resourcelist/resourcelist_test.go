@@ -370,3 +370,53 @@ func TestGolden(t *testing.T) {
 		}
 	}
 }
+
+// sgrBefore returns the parameters of the SGR sequence that directly
+// precedes the first glyph in row, or nil when glyph isn't styled.
+func sgrBefore(row, glyph string) []string {
+	head, _, ok := strings.Cut(row, glyph)
+	if !ok || !strings.HasSuffix(head, "m") {
+		return nil
+	}
+	return sgrParams(head[strings.LastIndex(head, "\x1b["):])
+}
+
+func TestDotAndWarningStyles(t *testing.T) {
+	st := th(t)
+	for s := range st.Status {
+		st.Status[s] = lipgloss.NewStyle().Foreground(lipgloss.ANSIColor(1 + int(s)))
+	}
+	st.Warning = lipgloss.NewStyle().Foreground(lipgloss.BrightYellow)
+	want := func(s lipgloss.Style) []string {
+		t.Helper()
+		p := sgrParams(s.Render("x"))
+		if len(p) == 0 {
+			t.Fatal("test style renders no SGR")
+		}
+		return p
+	}
+
+	rs := []tilt.Resource{
+		res("bad", status(tilt.UpdateError)),
+		res("good", built(time.Minute, time.Second, "w")),
+	}
+	m := New(st)
+	m.SetResources(rs)
+	// rows: All (cursor), bad, good
+	rows := strings.Split(m.View(40, 3, true, now), "\n")
+	var dots [][]string
+	for i, r := range rs {
+		row := rows[i+1]
+		got := sgrBefore(row, "●")
+		if exp := want(st.Status[r.Combined()]); !slices.Equal(got, exp) {
+			t.Fatalf("%s dot SGR = %v, want %v (Status[%v]) in %q", r.Metadata.Name, got, exp, r.Combined(), row)
+		}
+		dots = append(dots, got)
+	}
+	if slices.Equal(dots[0], dots[1]) {
+		t.Fatalf("both dots share SGR %v", dots[0])
+	}
+	if got, exp := sgrBefore(rows[2], "!"), want(st.Warning); !slices.Equal(got, exp) {
+		t.Fatalf("warning SGR = %v, want %v in %q", got, exp, rows[2])
+	}
+}
