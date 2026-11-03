@@ -79,6 +79,7 @@ type Model struct {
 
 	collapsed    map[string]bool
 	hideDisabled bool
+	filter       Filter
 	// pinned names a resource that stays listed even though visible
 	// rejects it, because the cursor was on it when it was filtered out.
 	pinned string
@@ -140,12 +141,48 @@ func (m *Model) SetResources(rs []tilt.Resource) {
 		return ga < gb
 	})
 	m.grouped = len(m.groups) > 1 || (len(m.groups) == 1 && m.groups[0].name != ungrouped)
+	m.pinSelectedIfHidden()
 	m.rebuild()
 }
 
 // visible is the filter rule. The pinned resource is exempt from it.
 func (m *Model) visible(r tilt.Resource) bool {
-	return !(m.hideDisabled && r.IsDisabled())
+	return !(m.hideDisabled && r.IsDisabled()) && m.filter.Match(r)
+}
+
+// pinSelectedIfHidden pins the selected resource when an update makes the
+// filter reject it, so a status change never moves the selection.
+func (m *Model) pinSelectedIfHidden() {
+	if m.target.kind != rowResource {
+		return
+	}
+	for _, r := range m.resources {
+		if r.Name() == m.target.name && !m.visible(r) {
+			m.pinned = r.Name()
+			return
+		}
+	}
+}
+
+// refilter rebuilds the rows after a filter change. It pins the resource
+// under the cursor first, so the change never moves the selection.
+func (m *Model) refilter() {
+	m.pinned = ""
+	if r := m.rows[m.cursor]; r.kind == rowResource {
+		m.pinned = m.target.name
+	}
+	m.rebuild()
+}
+
+// listed reports whether any resource of g gets a row when g is
+// expanded.
+func (m *Model) listed(g group) bool {
+	for _, i := range g.members {
+		if r := m.resources[i]; m.visible(r) || r.Name() == m.pinned {
+			return true
+		}
+	}
+	return false
 }
 
 // rebuild recomputes the rows and puts the cursor back on its target.
@@ -153,6 +190,11 @@ func (m *Model) visible(r tilt.Resource) bool {
 func (m *Model) rebuild() {
 	m.rows = append(m.rows[:0], row{kind: rowAll})
 	for _, g := range m.groups {
+		// The status filter hides a group it empties. Hidden disabled
+		// resources leave their group's header in place.
+		if m.filter != FilterAll && !m.listed(g) {
+			continue
+		}
 		if m.grouped {
 			m.rows = append(m.rows, row{kind: rowHeader, group: g.name})
 			if m.collapsed[g.name] {
@@ -251,11 +293,7 @@ func (m *Model) HandleKey(k tea.KeyPressMsg) (selectionChanged bool) {
 		m.rebuild()
 	case "d":
 		m.hideDisabled = !m.hideDisabled
-		m.pinned = ""
-		if r := m.rows[m.cursor]; r.kind == rowResource {
-			m.pinned = m.target.name
-		}
-		m.rebuild()
+		m.refilter()
 	default:
 		return false
 	}

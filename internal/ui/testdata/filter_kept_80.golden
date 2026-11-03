@@ -1,0 +1,20 @@
+╭─ Resources  ✗ 1  ✓ 2/3  [errors] ────────────────────────────────────────────╮
+│All Resources                                                                 │
+│▼ backend (1)                                                                 │
+│  ●  api                                                       11m ago · 11.4s│
+│▼ frontend (1)                                                                │
+│  ●  web (filtered)                                                           │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│● live  localhost:10350  13m 21s                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+ r trigger · f filter · tab switch · ? help · q quit
