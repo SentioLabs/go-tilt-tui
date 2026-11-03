@@ -164,6 +164,10 @@ func TestFindTiltOverrideMissing(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "tiltBinaryPath") {
 		t.Errorf("FindTilt(%q) = %v, want a tiltBinaryPath error", missing, err)
 	}
+	// An override with a slash is never searched on $PATH.
+	if err != nil && strings.Contains(err.Error(), "$PATH") {
+		t.Errorf("FindTilt(%q) = %v, want no mention of $PATH", missing, err)
+	}
 }
 
 // A tilt in the current directory reached through "." on PATH is refused.
@@ -379,7 +383,8 @@ func TestDoneClosesWhenTiltExitsLater(t *testing.T) {
 }
 
 // tilt exits on its own after startup and leaves a child in its group.
-// Stop still kills the child.
+// The child is killed before Done closes, while tilt's pid can't have
+// been reused. Stop then has nothing left to do.
 func TestStopAfterExitKillsGroup(t *testing.T) {
 	shortStartup(t)
 	pidFile := filepath.Join(t.TempDir(), "grandchild")
@@ -398,12 +403,12 @@ exit 0`)
 		c.Stop(time.Second)
 		t.Fatal("Done never closed")
 	}
-	if err := c.Stop(time.Second); err != nil {
-		t.Errorf("Stop after exit = %v", err)
-	}
 	if !gone(grandchild) {
 		syscall.Kill(grandchild, syscall.SIGKILL)
-		t.Errorf("grandchild pid %d survived Stop", grandchild)
+		t.Errorf("grandchild pid %d survived tilt's exit", grandchild)
+	}
+	if err := c.Stop(time.Second); err != nil {
+		t.Errorf("Stop after exit = %v", err)
 	}
 }
 
@@ -422,12 +427,14 @@ while :; do sleep 0.05; done`)
 		t.Fatal(err)
 	}
 	grandchild := pidFromFile(t, pidFile)
+	// tilt exits on SIGTERM, so Stop must not wait out the grace.
+	grace := 10 * time.Second
 	start := time.Now()
-	if err := c.Stop(5 * time.Second); err != nil {
+	if err := c.Stop(grace); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 3*time.Second {
-		t.Errorf("Stop took %v, want about waitDelay", d)
+	if d := time.Since(start); d >= 5*time.Second {
+		t.Errorf("Stop took %v, want about waitDelay and well under the %v grace", d, grace)
 	}
 	if err := c.ExitErr(); err != nil {
 		t.Errorf("ExitErr = %v, want nil for a tilt that exited 0", err)

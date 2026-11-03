@@ -26,8 +26,7 @@ var (
 const waitDelay = 2 * time.Second
 
 // Up starts `tilt up --port port args...`. It returns an error, including
-// tilt's stderr, if tilt exits within the startup window. It then kills
-// anything tilt left in its process group.
+// tilt's stderr, if tilt exits within the startup window.
 //
 // ctx bounds the startup window only. Cancelling it during the window
 // stops tilt and returns ctx.Err(). After Up returns, only Stop ends the
@@ -53,6 +52,13 @@ func (t Tilt) Up(ctx context.Context, port int, args []string) (*Child, error) {
 			// waitDelay. That is still a clean exit.
 			err = nil
 		}
+		// Kill anything tilt left in its group. Any member still holding
+		// stderr is alive now, and the kernel doesn't reuse tilt's pid
+		// while its group has members. Once the group empties the pid is
+		// free, so a later kill could hit an unrelated group. signalGroup
+		// already treats ESRCH as success. EPERM means only a member that
+		// changed user is left, and nothing here can kill it.
+		_ = signalGroup(cmd.Process.Pid, syscall.SIGKILL)
 		c.mu.Lock()
 		c.exitErr = err
 		c.mu.Unlock()
@@ -65,8 +71,7 @@ func (t Tilt) Up(ctx context.Context, port int, args []string) (*Child, error) {
 	case <-timer.C:
 		return c, nil
 	case <-c.done:
-		// Kill anything tilt started in its group before it died.
-		return nil, errors.Join(c.startupError(), signalGroup(cmd.Process.Pid, syscall.SIGKILL))
+		return nil, c.startupError()
 	case <-ctx.Done():
 		return nil, errors.Join(ctx.Err(), c.Stop(time.Second))
 	}
@@ -97,17 +102,15 @@ func (c *Child) startupError() error {
 // Stop sends SIGTERM, waits up to grace, then sends SIGKILL.
 //
 // The signals go to tilt's whole process group, so children tilt started
-// in that group stop too. Stop returns once tilt has exited. If tilt has
-// already exited, Stop only kills what tilt left in its group.
+// in that group stop too. Stop returns once tilt has exited. It does
+// nothing if tilt has already exited.
 func (c *Child) Stop(grace time.Duration) error {
-	pgid := c.cmd.Process.Pid
 	select {
 	case <-c.done:
-		// The kernel doesn't reuse tilt's pid while its group still
-		// has members, so this can't hit an unrelated group.
-		return signalGroup(pgid, syscall.SIGKILL)
+		return nil
 	default:
 	}
+	pgid := c.cmd.Process.Pid
 	if err := signalGroup(pgid, syscall.SIGTERM); err != nil {
 		return err
 	}
@@ -135,7 +138,8 @@ func signalGroup(pgid int, sig syscall.Signal) error {
 	return nil
 }
 
-// Done is closed when the process exits for any reason.
+// Done is closed when the process exits for any reason. By then anything
+// tilt left in its process group has been sent SIGKILL.
 func (c *Child) Done() <-chan struct{} { return c.done }
 
 // ExitErr returns how the process ended. Call it after Done is closed.

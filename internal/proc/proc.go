@@ -32,7 +32,7 @@ func FindTilt(override string) (Tilt, error) {
 			// LookPath reports a missing slash path as fs.ErrNotExist.
 			// Callers test for exec.ErrNotFound either way.
 			if errors.Is(err, fs.ErrNotExist) {
-				return Tilt{}, fmt.Errorf("tiltBinaryPath %q: %w: %w", override, exec.ErrNotFound, err)
+				return Tilt{}, fmt.Errorf("tiltBinaryPath %q: %w", override, noFileError{})
 			}
 			return Tilt{}, fmt.Errorf("tiltBinaryPath %q: %w", override, err)
 		}
@@ -49,6 +49,14 @@ func FindTilt(override string) (Tilt, error) {
 	}
 	return Tilt{Binary: abs}, nil
 }
+
+// noFileError is a missing override. It matches exec.ErrNotFound, but its
+// text doesn't claim a $PATH search that never ran.
+type noFileError struct{}
+
+func (noFileError) Error() string { return "no such file" }
+
+func (noFileError) Is(target error) bool { return target == exec.ErrNotFound }
 
 // FileWatches runs `tilt get filewatches -o json --host localhost --port
 // port` and returns its raw JSON. It never takes a hostname: Tilt's HTTP
