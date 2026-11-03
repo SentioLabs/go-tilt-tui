@@ -212,7 +212,8 @@ func TestCloseDuringRestartStopsNewTilt(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(begin); d >= time.Second {
+	// Up's in-window stop kills after 1 s, and the startup window is 2 s.
+	if d := time.Since(begin); d >= 1500*time.Millisecond {
 		t.Errorf("Close took %v: it waited out the startup window", d)
 	}
 	checkTiltStopped(t, dir, pid)
