@@ -27,11 +27,9 @@ const (
 	sgrReset = "\x1b[0m"
 )
 
-// footerHints names the commands the footer advertises, with a short label.
-var footerHints = []struct {
-	id    command.ID
-	label string
-}{
+// footerHints names the commands the footer always advertises, with a
+// short label. Feature hints go after the first one.
+var footerHints = []Hint{
 	{"trigger", "trigger"},
 	{"switch-pane", "switch"},
 	{"help", "help"},
@@ -122,17 +120,37 @@ func (m *Model) listTitle() string {
 		parts = append(parts, th.Status[tilt.StatusPending].Render(fmt.Sprintf("● %d", c.Busy)))
 	}
 	parts = append(parts, fmt.Sprintf("✓ %d/%d", c.Healthy, c.Total))
+	for _, f := range features {
+		if f.ListTitle == nil {
+			continue
+		}
+		if s := f.ListTitle(m); s != "" {
+			parts = append(parts, hookText(s))
+		}
+	}
 	return strings.Join(parts, "  ")
 }
 
-// logPane is the boxed log view. The body draws first because it can turn
-// follow mode on after a reset, which the title shows.
+// logPane is the boxed log view, or a feature's panel in its place. The
+// body draws first because it can turn follow mode on after a reset,
+// which the title shows.
 func (m *Model) logPane(w, h int, focused bool) []string {
-	body := m.logs.View(max(0, w-2), max(0, h-2), focused)
 	th := m.d.Theme
+	if title, body, ok := m.panel(); ok {
+		return strings.Split(box(th.Title.Render(termsafe.Text(title)), body, w, h, m.border(focused)), "\n")
+	}
+	body := m.logs.View(max(0, w-2), max(0, h-2), focused)
 	parts := []string{th.Title.Render(m.logs.Title())}
 	if m.logs.Following() {
 		parts = append(parts, th.Dim.Render("[follow]"))
+	}
+	for _, f := range features {
+		if f.LogTitle == nil {
+			continue
+		}
+		if s := f.LogTitle(m); s != "" {
+			parts = append(parts, hookText(s))
+		}
 	}
 	if len(m.d.Filters) > 0 {
 		parts = append(parts, th.Dim.Render("filters: "+termsafe.Text(strings.Join(m.d.Filters, ", "))))
@@ -158,11 +176,56 @@ func (m *Model) statusParts(now time.Time, errW int) []string {
 		}
 		conn = th.Status[tilt.StatusUnhealthy].Render(text)
 	}
+	for _, f := range features {
+		if f.ConnStatus == nil {
+			continue
+		}
+		if text, ok := f.ConnStatus(m); ok {
+			conn = hookText(text)
+			break
+		}
+	}
 	parts := []string{conn, th.Dim.Render(termsafe.Text(m.d.Addr))}
 	if m.showsUptime() {
 		parts = append(parts, uptime(now.Sub(m.startTime)))
 	}
+	for _, f := range features {
+		if f.StatusParts == nil {
+			continue
+		}
+		for _, p := range f.StatusParts(m) {
+			if p != "" {
+				parts = append(parts, hookText(p))
+			}
+		}
+	}
 	return parts
+}
+
+// panel returns the first feature panel that is showing. Each body line
+// passes through termsafe.LogLine.
+func (m *Model) panel() (title, body string, ok bool) {
+	for _, f := range features {
+		if f.Panel == nil {
+			continue
+		}
+		title, body, ok := f.Panel(m)
+		if !ok {
+			continue
+		}
+		lines := strings.Split(body, "\n")
+		for i, l := range lines {
+			lines[i] = termsafe.LogLine(l)
+		}
+		return title, strings.Join(lines, "\n"), true
+	}
+	return "", "", false
+}
+
+// hookText makes a feature hook's text safe to draw on one line. It keeps
+// SGR styling and removes every other escape sequence.
+func hookText(s string) string {
+	return termsafe.LogLine(strings.ReplaceAll(s, "\n", " "))
 }
 
 // remoteMarker is shown for as long as --allow-remote is set.
@@ -210,15 +273,26 @@ func uptime(d time.Duration) string {
 }
 
 // footer is the flash while it lasts, else the key hints. The narrow log
-// pane has no status line of its own, so the status leads its footer.
+// pane has no status line of its own, so the status leads its footer. The
+// status gets the cells the flash or the core hints leave. Feature hints
+// get what is left after that.
 func (m *Model) footer(now time.Time) string {
-	text := m.d.Theme.Dim.Render(m.hints())
+	avail := m.width - 1
+	flash := ""
 	if m.flashActive() {
-		text = termsafe.Text(m.flash)
+		flash = termsafe.Text(m.flash)
+	}
+	reserve := flash
+	if reserve == "" {
+		reserve = m.hints(0)
 	}
 	lead := ""
 	if m.narrow() && m.focus == command.FocusLogs {
-		lead = m.footerStatus(now, m.width-1-ansi.StringWidth(text))
+		lead = m.footerStatus(now, avail-ansi.StringWidth(reserve))
+	}
+	text := flash
+	if text == "" {
+		text = m.d.Theme.Dim.Render(m.hints(avail - ansi.StringWidth(lead)))
 	}
 	return ansi.Truncate(" "+lead+text, m.width, "…")
 }
@@ -244,16 +318,38 @@ func (m *Model) footerStatus(now time.Time, w int) string {
 	return lead
 }
 
-func (m *Model) hints() string {
+// hints returns the footer hints in at most w cells where it can. The
+// core hints always show. Feature hints go after the first core hint and
+// are dropped from the last one back until the line fits.
+func (m *Model) hints(w int) string {
 	cmds := m.commands()
-	parts := make([]string, 0, len(footerHints))
+	label := func(h Hint) string {
+		i := slices.IndexFunc(cmds, func(c command.Command) bool { return c.ID == h.ID })
+		if i < 0 || len(cmds[i].Keys) == 0 {
+			return ""
+		}
+		return cmds[i].Keys[0] + " " + h.Label
+	}
+	var core, extra []string
 	for _, h := range footerHints {
-		i := slices.IndexFunc(cmds, func(c command.Command) bool { return c.ID == h.id })
-		if i >= 0 && len(cmds[i].Keys) > 0 {
-			parts = append(parts, cmds[i].Keys[0]+" "+h.label)
+		if s := label(h); s != "" {
+			core = append(core, s)
 		}
 	}
-	return strings.Join(parts, " · ")
+	for _, f := range features {
+		for _, h := range f.Hints {
+			if s := label(h); s != "" {
+				extra = append(extra, termsafe.Text(s))
+			}
+		}
+	}
+	at := min(1, len(core))
+	for n := len(extra); ; n-- {
+		line := strings.Join(slices.Concat(core[:at], extra[:n], core[at:]), " · ")
+		if n == 0 || ansi.StringWidth(line) <= w {
+			return line
+		}
+	}
 }
 
 // drawOverlay boxes o, sized to its content, and splices it centred over

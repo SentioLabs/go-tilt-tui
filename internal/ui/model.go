@@ -4,6 +4,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 
@@ -44,11 +45,13 @@ type (
 
 // Private messages that commands and ticks send back to Update.
 type (
-	// flashMsg shows text in the footer. at orders flashes that race each
-	// other, such as a trigger's start and its result.
+	// flashMsg shows text in the footer for d, or for flashFor when d is
+	// zero. at orders flashes that race each other, such as a trigger's
+	// start and its result.
 	flashMsg struct {
 		text string
 		at   time.Time
+		d    time.Duration
 	}
 	switchPaneMsg struct{}
 	showPaneMsg   struct{ focus command.Focus }
@@ -58,7 +61,13 @@ type (
 // Client is the slice of tilt.Client the UI needs. Tests fake it.
 type Client interface {
 	Trigger(ctx context.Context, name string) error
+	// ClickButton records a click on b with the given input values and
+	// returns the updated button. It returns tilt.ErrConflict on HTTP 409.
+	ClickButton(ctx context.Context, b tilt.Button, values map[string]any) (tilt.Button, error)
 }
+
+// errNoOpener is what Deps.Open returns when main didn't set it.
+var errNoOpener = errors.New("no URL opener configured")
 
 type Deps struct {
 	Client  Client
@@ -69,6 +78,9 @@ type Deps struct {
 	Remote  bool             // --allow-remote: show "⚠ unencrypted remote"
 	Flash   string           // startup warnings
 	Now     func() time.Time // nil means time.Now
+	// Open opens an http or https URL in the browser. main passes
+	// proc.OpenURL. nil means every call fails with errNoOpener.
+	Open func(ctx context.Context, url string) error
 }
 
 type connState int
@@ -98,17 +110,26 @@ type Model struct {
 	flashAt    time.Time // when the shown flash was issued
 	flashUntil time.Time
 	ticking    bool
+
+	// fstate holds each feature's state by Feature.Name. Value copies of
+	// Model share the map, which is what keeps state across Update.
+	fstate map[string]any
 }
 
 func New(d Deps) Model {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
+	if d.Open == nil {
+		d.Open = func(context.Context, string) error { return errNoOpener }
+	}
 	m := Model{
 		d:     d,
 		store: tilt.NewStore(),
 		list:  resourcelist.New(d.Theme),
 		logs:  logview.New(d.Logs, d.Theme),
+
+		fstate: map[string]any{},
 	}
 	if d.Flash != "" {
 		m.setFlash(d.Flash, d.Now(), startupFlashFor)
@@ -180,7 +201,11 @@ func (m Model) handle(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case flashMsg:
-		m.setFlash(msg.text, msg.at, flashFor)
+		d := msg.d
+		if d <= 0 {
+			d = flashFor
+		}
+		m.setFlash(msg.text, msg.at, d)
 
 	case switchPaneMsg:
 		if m.focus == command.FocusList {

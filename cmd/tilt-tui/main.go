@@ -14,6 +14,7 @@ import (
 
 	"github.com/sentiolabs/go-tilt-tui/internal/config"
 	"github.com/sentiolabs/go-tilt-tui/internal/logstore"
+	"github.com/sentiolabs/go-tilt-tui/internal/proc"
 	"github.com/sentiolabs/go-tilt-tui/internal/tilt"
 	"github.com/sentiolabs/go-tilt-tui/internal/ui"
 	"github.com/sentiolabs/go-tilt-tui/internal/ui/theme"
@@ -81,6 +82,7 @@ func run() error {
 		Filters: filterNames,
 		Remote:  *allowRemote,
 		Flash:   strings.Join(warnings, " · "),
+		Open:    proc.OpenURL,
 	}))
 	go watch(ctx, client, p)
 

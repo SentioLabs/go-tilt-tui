@@ -27,14 +27,61 @@ var update = flag.Bool("update", false, "rewrite golden files")
 
 var now = time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 
+// --- Contract assertions ---
+
+var (
+	_ Client                                      = (*tilt.Client)(nil)
+	_ Client                                      = (*fakeClient)(nil)
+	_ func(context.Context, string) error         = Deps{}.Open
+	_ func(*Model, string, time.Duration) tea.Cmd = (*Model).flashCmd
+	_ func(*Model) (string, bool)                 = Feature{}.ConnStatus
+	_ func(*Model) []string                       = Feature{}.StatusParts
+	_ func(*Model) string                         = Feature{}.ListTitle
+	_ func(*Model) string                         = Feature{}.LogTitle
+	_ []Hint                                      = Feature{}.Hints
+	_ func(*Model) (string, string, bool)         = Feature{}.Panel
+	_ command.ID                                  = Hint{}.ID
+)
+
+// click is one ClickButton call the fake recorded.
+type click struct {
+	button tilt.Button
+	values map[string]any
+}
+
 type fakeClient struct {
 	triggered []string
 	err       error
+
+	clicks   []click
+	clickErr error
+	// clickResult builds the button ClickButton returns. nil returns the
+	// clicked button unchanged.
+	clickResult func(tilt.Button) tilt.Button
 }
 
 func (f *fakeClient) Trigger(_ context.Context, name string) error {
 	f.triggered = append(f.triggered, name)
 	return f.err
+}
+
+func (f *fakeClient) ClickButton(_ context.Context, b tilt.Button, values map[string]any) (tilt.Button, error) {
+	f.clicks = append(f.clicks, click{button: b, values: values})
+	if f.clickErr != nil {
+		return tilt.Button{}, f.clickErr
+	}
+	if f.clickResult != nil {
+		return f.clickResult(b), nil
+	}
+	return b, nil
+}
+
+// withFeatures replaces the feature registry with fs until the test ends.
+func withFeatures(t *testing.T, fs ...Feature) {
+	t.Helper()
+	saved := features
+	t.Cleanup(func() { features = saved })
+	features = fs
 }
 
 func newModel(t *testing.T, d Deps) (Model, *fakeClient) {
@@ -312,6 +359,9 @@ func TestGolden(t *testing.T) {
 		{"help_140", 140, 30, []string{"?"}},
 		{"help_80", 80, 30, []string{"?"}},
 	}
+	// The golden files show the root model alone. Features test their own
+	// screens, so adding one never rewrites these files.
+	withFeatures(t)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m, _ := setup(t, tc.w, tc.h, Deps{})
@@ -519,5 +569,163 @@ func TestFeatureHandledStopsHandling(t *testing.T) {
 	m = press(m, "j", "j")
 	if m.list.Selected() != before {
 		t.Fatal("a key a feature handled still moved the list")
+	}
+}
+
+func hookCommand(id command.ID, k string) command.Command {
+	return command.Command{ID: id, Title: string(id), Keys: []string{k}, Scope: command.ScopeGlobal,
+		Run: func(command.Context) tea.Cmd { return nil }}
+}
+
+func TestFeatureHooks(t *testing.T) {
+	panel := false
+	withFeatures(t, Feature{
+		Name:        "hooks",
+		Commands:    func(*Model) []command.Command { return []command.Command{hookCommand("hook", "x")} },
+		StatusParts: func(*Model) []string { return []string{"extra\x1b]0;pwned\x07part", ""} },
+		ListTitle:   func(*Model) string { return "filter: errors" },
+		LogTitle:    func(*Model) string { return "3/17" },
+		Hints:       []Hint{{ID: "hook", Label: "hook"}, {ID: "missing", Label: "never shown"}},
+		Panel: func(*Model) (string, string, bool) {
+			return "tilt exited (code 1)", "first\nerror: bad\x1b]52;c;ZXZpbA==\x07 Tiltfile", panel
+		},
+	})
+	m, _ := setup(t, 140, 20, Deps{})
+	s := screen(m)
+	for _, want := range []string{
+		"✓ 2/3  filter: errors",
+		"[follow]  3/17",
+		"│extrapart ",
+		"r trigger · x hook · tab switch · ? help · q quit",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("screen lacks %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "never shown") {
+		t.Error("a hint for a missing command was shown")
+	}
+
+	panel = true
+	s = screen(m)
+	for _, want := range []string{"tilt exited (code 1)", "first", "error: bad Tiltfile"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("panel lacks %q:\n%s", want, s)
+		}
+	}
+	if strings.Contains(s, "api starting") {
+		t.Errorf("log lines drawn under the panel:\n%s", s)
+	}
+	if rest := sgr.ReplaceAllString(m.render(), ""); strings.ContainsAny(rest, "\x1b\x07") {
+		t.Fatalf("hook text reached the terminal unfiltered: %q", rest)
+	}
+}
+
+func TestFeatureConnStatus(t *testing.T) {
+	starting := true
+	withFeatures(t,
+		Feature{Name: "off", ConnStatus: func(*Model) (string, bool) { return "never", false }},
+		Feature{Name: "child", ConnStatus: func(*Model) (string, bool) { return "starting tilt…", starting }},
+		Feature{Name: "late", ConnStatus: func(*Model) (string, bool) { return "too late", true }},
+	)
+	m, _ := setup(t, 140, 20, Deps{})
+	m, _ = send(m, ConnMsg{Err: errors.New("dial tcp: connection refused")})
+	s := screen(m)
+	if !strings.Contains(s, "starting tilt…  localhost:10350") || strings.Contains(s, "disconnected") {
+		t.Fatalf("ConnStatus did not replace the connection state:\n%s", s)
+	}
+	if strings.Contains(s, "never") || strings.Contains(s, "too late") {
+		t.Fatalf("a ConnStatus other than the first ok one was drawn:\n%s", s)
+	}
+	starting = false
+	if s := screen(m); !strings.Contains(s, "too late") {
+		t.Fatalf("the next ok ConnStatus did not take over:\n%s", s)
+	}
+}
+
+func TestFeatureHintsDropWhenFooterIsFull(t *testing.T) {
+	var cmds []command.Command
+	var hints []Hint
+	for _, k := range []string{"a", "b", "c", "x", "y", "z"} {
+		id := command.ID("hint-" + k)
+		cmds = append(cmds, hookCommand(id, k))
+		hints = append(hints, Hint{ID: id, Label: "long feature hint " + k})
+	}
+	withFeatures(t, Feature{
+		Name:     "many-hints",
+		Commands: func(*Model) []command.Command { return cmds },
+		Hints:    hints,
+	})
+	m, _ := setup(t, 80, 20, Deps{Remote: true})
+	footer := func(m Model) string {
+		lines := strings.Split(screen(m), "\n")
+		return lines[len(lines)-1]
+	}
+	f := footer(m)
+	if !strings.Contains(f, "r trigger · a long feature hint a") || !strings.HasSuffix(f, "? help · q quit") {
+		t.Fatalf("footer = %q, want the first hints and every core hint", f)
+	}
+	if strings.Contains(f, "hint z") {
+		t.Fatalf("footer = %q, the last hint should have been dropped", f)
+	}
+	m = press(m, "enter")
+	if f := footer(m); !strings.Contains(f, "⚠ unencrypted remote") || !strings.HasSuffix(f, "q quit") {
+		t.Fatalf("narrow log footer = %q, want the marker and q quit", f)
+	}
+	checkFrame(t, m, 80, 20)
+}
+
+func TestFlashCmdDuration(t *testing.T) {
+	m, _ := setup(t, 140, 20, Deps{})
+	clock := now
+	m.d.Now = func() time.Time { return clock }
+	m, _ = send(m, m.flashCmd("disabled api · ctrl+d again to re-enable", 5*time.Second)())
+	clock = now.Add(4 * time.Second)
+	m, _ = send(m, tickMsg(clock))
+	if !strings.Contains(screen(m), "disabled api") {
+		t.Fatal("5s flash gone after 4s")
+	}
+	clock = now.Add(5 * time.Second)
+	m, _ = send(m, tickMsg(clock))
+	if strings.Contains(screen(m), "disabled api") {
+		t.Fatal("5s flash still shown after 5s")
+	}
+
+	m, _ = send(m, m.flashCmd("default length", 0)())
+	clock = clock.Add(3 * time.Second)
+	m, _ = send(m, tickMsg(clock))
+	if strings.Contains(screen(m), "default length") {
+		t.Fatal("a zero duration did not mean 3s")
+	}
+}
+
+func TestDepsOpen(t *testing.T) {
+	m, _ := newModel(t, Deps{})
+	if err := m.d.Open(context.Background(), "http://localhost:8080"); !errors.Is(err, errNoOpener) {
+		t.Fatalf("default Open = %v, want errNoOpener", err)
+	}
+	var opened []string
+	m, _ = newModel(t, Deps{Open: func(_ context.Context, u string) error { opened = append(opened, u); return nil }})
+	if err := m.d.Open(context.Background(), "http://localhost:8080"); err != nil || !slices.Equal(opened, []string{"http://localhost:8080"}) {
+		t.Fatalf("Open = %v, opened %q", err, opened)
+	}
+}
+
+func TestFeatureStatePerModel(t *testing.T) {
+	type counter struct{ n int }
+	newCounter := func() *counter { return &counter{} }
+	a, _ := newModel(t, Deps{})
+	b, _ := newModel(t, Deps{})
+	featureState(&a, "count", newCounter).n++
+	featureState(&a, "count", newCounter).n++
+	if got := featureState(&a, "count", newCounter).n; got != 2 {
+		t.Fatalf("a's state = %d, want 2", got)
+	}
+	if got := featureState(&b, "count", newCounter).n; got != 0 {
+		t.Fatalf("b shares a's state: %d", got)
+	}
+	nm, _ := a.Update(ConnMsg{Connecting: true})
+	if got := featureState(new(nm.(Model)), "count", newCounter).n; got != 2 {
+		t.Fatalf("state lost across Update: %d", got)
 	}
 }
