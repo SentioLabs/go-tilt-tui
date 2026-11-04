@@ -45,6 +45,8 @@ func TestText(t *testing.T) {
 		{"unterminated C1 OSC removed to end", "a\u009d0;spoof", "a"},
 		{"C1 DCS not ended by BEL", "a\u0090q\x07b\x1b\\c", "ac"},
 		{"C1 introducer inside an OSC is payload", "a\x1b]\u0090\x1b\\b", "ab"},
+		{"joined C1 introducer after a removed string", "a\xc2\u009dP1\x07\x9d0;PAYLOAD\x07b", "ab"},
+		{"joined C1 introducer runs to end", "\xc2\xc2\x9dx\x07\x9dspoof", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

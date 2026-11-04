@@ -15,7 +15,16 @@ import (
 // U+FFFD. Strings opened by a C1 introducer rune are removed with their
 // payload. Use it for names, errors, labels, URLs and paths.
 func Text(s string) string {
-	s = dropC1Strings(s)
+	// Removing a string can join a lone C2 and a raw 9D into a new
+	// introducer, so repeat until nothing more is removed. Each pass
+	// only removes bytes, so the loop ends.
+	for {
+		t := dropC1Strings(s)
+		if len(t) == len(s) {
+			break
+		}
+		s = t
+	}
 	var b strings.Builder
 	b.Grow(len(s))
 	for len(s) > 0 {
