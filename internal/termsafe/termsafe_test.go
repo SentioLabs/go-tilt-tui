@@ -1,8 +1,10 @@
 package termsafe
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -47,6 +49,7 @@ func TestText(t *testing.T) {
 		{"C1 introducer inside an OSC is payload", "a\x1b]\u0090\x1b\\b", "ab"},
 		{"joined C1 introducer after a removed string", "a\xc2\u009dP1\x07\x9d0;PAYLOAD\x07b", "ab"},
 		{"joined C1 introducer runs to end", "\xc2\xc2\x9dx\x07\x9dspoof", ""},
+		{"ESC joined to a string after a C1 removal", "\x1b\u009dx\a]A\x1bPq\a\u009dzz\x1b\\b", "b"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,6 +111,7 @@ func TestLogLine(t *testing.T) {
 		{"unterminated C1 OSC removed to end", "a\u009d0;spoof", "a"},
 		{"C1 DCS not ended by BEL", "a\u0090q\x07b\x1b\\c", "ac"},
 		{"C1 introducer inside an OSC is payload", "a\x1b]\u0090\x1b\\b", "ab"},
+		{"ESC joined to a string after a C1 removal", "\x1b\u009dx\a]A\x1bPq\a\u009dzz\x1b\\b", "b"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -136,6 +140,105 @@ func TestLogLineStrandedC1OSC(t *testing.T) {
 	}
 	if i := strings.IndexByte(got, 0x9d); i >= 0 {
 		t.Errorf("LogLine(%q) = %q has byte 0x9d at %d", in, got, i)
+	}
+}
+
+// byteJoins returns an input that needs k passes of dropC1Strings that
+// remove bytes. Each pass removes one string and joins the next lone C2
+// with the next raw 9D into a new U+009D. ToValidUTF8 turns both bytes
+// into U+FFFD, so this nesting never reaches dropC1Strings in LogLine.
+func byteJoins(k int) string {
+	return "a" + strings.Repeat("\xc2", k-1) + "\u009dP\a" + strings.Repeat("\x9dx\a", k-1) + "b"
+}
+
+// escJoins returns valid UTF-8 that needs k passes of dropC1Strings that
+// remove bytes. Each pass removes one C1 string and joins the ESC before
+// it with the "]" after it. The new OSC hides the ESC P that used to hide
+// the next C1 string, so the next pass finds that string.
+func escJoins(k int) string {
+	var b strings.Builder
+	b.WriteString("\x1b\u009dx\a")
+	for i := 1; i < k; i++ {
+		b.WriteString("]A\x1bPq\a")
+		if i < k-1 {
+			b.WriteString("\x1b")
+		}
+		b.WriteString("\u009dz\x1b\\")
+	}
+	b.WriteString("b")
+	return b.String()
+}
+
+// dropC1StringsFixpoint reruns dropC1Strings with no bound. It returns
+// the result and the number of passes that removed bytes.
+func dropC1StringsFixpoint(s string) (string, int) {
+	for n := 0; ; n++ {
+		t := dropC1Strings(s)
+		if len(t) == len(s) {
+			return s, n
+		}
+		s = t
+	}
+}
+
+func TestNestedJoinsFailClosed(t *testing.T) {
+	for _, k := range []int{7, 9} {
+		for name, in := range map[string]string{"bytes": byteJoins(k), "ESC": escJoins(k)} {
+			if _, n := dropC1StringsFixpoint(in); n != k {
+				t.Fatalf("%s k=%d: input needs %d passes, want %d", name, k, n, k)
+			}
+		}
+	}
+
+	t.Run("k=7 matches the unbounded loop", func(t *testing.T) {
+		in := byteJoins(7)
+		stable, _ := dropC1StringsFixpoint(in)
+		if got, want := Text(in), Text(stable); got != want || got != "ab" {
+			t.Errorf("Text(byteJoins(7)) = %q, want %q", got, want)
+		}
+		in = escJoins(7)
+		stable, _ = dropC1StringsFixpoint(in)
+		if got, want := Text(in), Text(stable); got != want || got != "b" {
+			t.Errorf("Text(escJoins(7)) = %q, want %q", got, want)
+		}
+		if got, want := LogLine(in), LogLine(stable); got != want || got != "b" {
+			t.Errorf("LogLine(escJoins(7)) = %q, want %q", got, want)
+		}
+	})
+
+	for _, k := range []int{9, 100000} {
+		t.Run(fmt.Sprintf("k=%d fails closed", k), func(t *testing.T) {
+			calls := []struct {
+				name string
+				f    func(string) string
+				in   string
+			}{
+				{"Text(byteJoins)", Text, byteJoins(k)},
+				{"Text(escJoins)", Text, escJoins(k)},
+				{"LogLine(escJoins)", LogLine, escJoins(k)},
+			}
+			for _, c := range calls {
+				start := time.Now()
+				got := c.f(c.in)
+				if d := time.Since(start); d > time.Second {
+					t.Errorf("%s took %v, want under 1s", c.name, d)
+				}
+				if got != "�" {
+					t.Errorf("%s = %q, want %q", c.name, got, "�")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkTextNestedJoins(b *testing.B) {
+	for _, k := range []int{1000, 10000} {
+		in := byteJoins(k)
+		b.Run(fmt.Sprintf("k=%d", k), func(b *testing.B) {
+			for b.Loop() {
+				Text(in)
+			}
+		})
 	}
 }
 

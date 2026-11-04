@@ -13,17 +13,12 @@ import (
 // Text returns s with every escape sequence removed, tabs and newlines
 // turned into spaces, and other C0/C1 control characters replaced with
 // U+FFFD. Strings opened by a C1 introducer rune are removed with their
-// payload. Use it for names, errors, labels, URLs and paths.
+// payload. Input that nests such strings too deep becomes a single
+// U+FFFD. Use it for names, errors, labels, URLs and paths.
 func Text(s string) string {
-	// Removing a string can join a lone C2 and a raw 9D into a new
-	// introducer, so repeat until nothing more is removed. Each pass
-	// only removes bytes, so the loop ends.
-	for {
-		t := dropC1Strings(s)
-		if len(t) == len(s) {
-			break
-		}
-		s = t
+	s, ok := dropC1StringsStable(s)
+	if !ok {
+		return "�"
 	}
 	var b strings.Builder
 	b.Grow(len(s))
@@ -56,9 +51,14 @@ func Text(s string) string {
 // LogLine returns s with SGR (colour and style) sequences kept and every
 // other escape sequence removed. Tabs expand to spaces; other control
 // characters become U+FFFD. Strings opened by a C1 introducer rune are
-// removed with their payload. s must be a single line without "\n".
+// removed with their payload. Input that nests such strings too deep
+// becomes a single U+FFFD. s must be a single line without "\n".
 func LogLine(s string) string {
-	s = replaceC1(dropC1Strings(strings.ToValidUTF8(s, "�")))
+	s, ok := dropC1StringsStable(strings.ToValidUTF8(s, "�"))
+	if !ok {
+		return "�"
+	}
+	s = replaceC1(s)
 
 	var b strings.Builder
 	b.Grow(len(s))
@@ -144,6 +144,25 @@ func stringLen(s string) int {
 		}
 	}
 	return len(s)
+}
+
+// maxC1Passes bounds how often dropC1Strings reruns. Each removal can
+// join bytes into a new string, so a crafted input needs one pass per
+// nesting level. Past the bound the input is treated as hostile.
+const maxC1Passes = 8
+
+// dropC1StringsStable reruns dropC1Strings until nothing more is
+// removed. It reports false when the input still changes after
+// maxC1Passes, and the caller then shows none of it.
+func dropC1StringsStable(s string) (string, bool) {
+	for range maxC1Passes {
+		t := dropC1Strings(s)
+		if len(t) == len(s) {
+			return s, true
+		}
+		s = t
+	}
+	return s, false
 }
 
 // dropC1Strings returns s with every C1 string removed. A C1 string
