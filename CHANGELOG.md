@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/SentioLabs/go-tilt-tui/compare/v0.3.0...v0.4.0) (2026-11-04)
+
+
+### Features
+
+* **config:** add the mouseWheelList key ([c1656f4](https://github.com/SentioLabs/go-tilt-tui/commit/c1656f4978206ad458c596a6ef8935dc00041de1))
+* **overlay:** add a settings pane ([e2a77ab](https://github.com/SentioLabs/go-tilt-tui/commit/e2a77ab007867cdd4a6633914bd23ea536cfbc53))
+* **resourcelist:** scroll the view without moving the cursor ([65015b0](https://github.com/SentioLabs/go-tilt-tui/commit/65015b081d506675f66665ca312206319747915b))
+* **ui:** add a settings pane and a wheel scroll mode ([cd2a1ef](https://github.com/SentioLabs/go-tilt-tui/commit/cd2a1ef4abd75ec60e77ab97e638aabd6a6854a4))
+
 ## [0.3.0](https://github.com/SentioLabs/go-tilt-tui/compare/v0.2.0...v0.3.0) (2026-11-04)
 
 
