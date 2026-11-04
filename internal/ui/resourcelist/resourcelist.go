@@ -88,6 +88,7 @@ type Model struct {
 	pinnedGroup string
 
 	offset    int  // first row drawn by View
+	lastH     int  // list lines drawn by the last View
 	showsTime bool // the last View drew a relative time
 }
 
@@ -278,6 +279,14 @@ func (m *Model) moveTo(i int) {
 	m.dropStalePin()
 }
 
+// toggleGroup collapses or expands the group of the header under the
+// cursor.
+func (m *Model) toggleGroup() {
+	g := m.rows[m.cursor].group
+	m.collapsed[g] = !m.collapsed[g]
+	m.rebuild()
+}
+
 func (m *Model) HandleKey(k tea.KeyPressMsg) (selectionChanged bool) {
 	before := m.source
 	switch k.String() {
@@ -293,9 +302,7 @@ func (m *Model) HandleKey(k tea.KeyPressMsg) (selectionChanged bool) {
 		if !m.OnHeader() {
 			return false
 		}
-		g := m.rows[m.cursor].group
-		m.collapsed[g] = !m.collapsed[g]
-		m.rebuild()
+		m.toggleGroup()
 	case "e":
 		clear(m.collapsed)
 		m.rebuild()
@@ -314,6 +321,23 @@ func (m *Model) HandleKey(k tea.KeyPressMsg) (selectionChanged bool) {
 		return false
 	}
 	return m.source != before
+}
+
+// ClickRow acts on a click on line i of the last View, counting from 0.
+// A click on the row under the cursor that is a group header toggles the
+// group, like enter. A click on any other row moves the cursor there.
+// ClickRow reports false, and changes nothing, when line i drew no row.
+func (m *Model) ClickRow(i int) bool {
+	ri := m.offset + i
+	if i < 0 || i >= m.lastH || ri >= len(m.rows) {
+		return false
+	}
+	if ri == m.cursor && m.OnHeader() {
+		m.toggleGroup()
+		return true
+	}
+	m.moveTo(ri)
+	return true
 }
 
 func (m *Model) Selected() logstore.Source { return m.source }
@@ -359,8 +383,10 @@ func (m *Model) Counts() Counts {
 func (m *Model) View(w, h int, focused bool, now time.Time) string {
 	m.showsTime = false
 	if h <= 0 {
+		m.lastH = 0
 		return ""
 	}
+	m.lastH = h
 	if m.cursor < m.offset {
 		m.offset = m.cursor
 	}

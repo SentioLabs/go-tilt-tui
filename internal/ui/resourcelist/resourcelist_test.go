@@ -497,3 +497,66 @@ func TestWaitingOnIsDim(t *testing.T) {
 		t.Fatalf("waiting text SGR = %v, want faint in %q", got, row)
 	}
 }
+
+func TestClickRow(t *testing.T) {
+	m := New(th(t))
+	m.SetResources([]tilt.Resource{res("api", labels("app", "be")), res("web", labels("app", "fe"))})
+	// rows: All, ▼ be, api, ▼ fe, web
+	plain(m, 30, 5)
+	if !m.ClickRow(2) || m.Selected() != (logstore.Source{Resource: "api"}) {
+		t.Fatalf("click on api: Selected = %+v", m.Selected())
+	}
+	// An unselected header only takes the cursor and keeps the source.
+	if !m.ClickRow(1) || !m.OnHeader() || m.Selected() != (logstore.Source{Resource: "api"}) {
+		t.Fatalf("click on header be: OnHeader %v, Selected %+v", m.OnHeader(), m.Selected())
+	}
+	if got := plain(m, 30, 5); strings.TrimRight(got[1], " ") != "▼ be (1)" {
+		t.Fatalf("first click collapsed the header: %q", got)
+	}
+	// A click on the selected header toggles it, like enter.
+	if !m.ClickRow(1) {
+		t.Fatal("second click on header reported no row")
+	}
+	if got := plain(m, 30, 5); strings.TrimRight(got[1], " ") != "▶ be (1)" {
+		t.Fatalf("second click did not collapse: %q", got)
+	}
+	m.ClickRow(1)
+	if got := plain(m, 30, 5); strings.TrimRight(got[1], " ") != "▼ be (1)" {
+		t.Fatalf("third click did not expand: %q", got)
+	}
+}
+
+func TestClickRowScrolled(t *testing.T) {
+	m := New(th(t))
+	var rs []tilt.Resource
+	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "j"} {
+		rs = append(rs, res(n))
+	}
+	m.SetResources(rs) // rows: All, a .. j
+	m.HandleKey(key("G"))
+	got := plain(m, 30, 3) // draws h, i, j
+	if !m.ClickRow(0) {
+		t.Fatal("click on the first drawn line reported no row")
+	}
+	if m.Selected() != (logstore.Source{Resource: "h"}) {
+		t.Fatalf("click hit the row from the top, not the drawn row: %+v (screen %q)", m.Selected(), got)
+	}
+}
+
+func TestClickRowMisses(t *testing.T) {
+	m := New(th(t))
+	m.SetResources([]tilt.Resource{res("a"), res("b"), res("c")})
+	if m.ClickRow(0) {
+		t.Fatal("ClickRow hit a row before any View")
+	}
+	plain(m, 30, 6) // rows All, a, b, c on lines 0..3; lines 4, 5 are empty
+	m.HandleKey(key("j"))
+	for _, i := range []int{-1, 4, 5, 6, 100} {
+		if m.ClickRow(i) {
+			t.Errorf("ClickRow(%d) reported a row", i)
+		}
+		if m.Selected() != (logstore.Source{Resource: "a"}) {
+			t.Fatalf("ClickRow(%d) moved the cursor: %+v", i, m.Selected())
+		}
+	}
+}
