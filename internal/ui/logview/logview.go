@@ -141,34 +141,39 @@ func (m *Model) up(n int) {
 	}
 }
 
-// down scrolls n rows towards newer lines. It stops once the newest line's
-// last row is at the bottom of the pane and never turns follow on.
+// down scrolls n wrapped rows toward the end. It stops when lastH rows
+// or fewer remain below the top, so the last screen stays full. It
+// fetches n+lastH+1 lines once: each step advances at most one line,
+// so that covers every check a row-at-a-time walk would make.
 func (m *Model) down(n int) {
-	if m.follow {
+	if m.follow || n <= 0 {
 		return
 	}
 	m.normalize()
-	for range n {
-		lines := m.fromTop(m.lastH + 1)
-		if len(lines) == 0 {
-			return
-		}
-		below := -m.topRow
-		for _, l := range lines {
-			below += len(m.rowsOf(l))
-		}
-		if below <= m.lastH {
-			return
-		}
-		switch {
-		case m.topRow+1 < len(m.rowsOf(lines[0])):
-			m.topRow++
-		case len(lines) > 1:
-			m.top, m.topRow = lines[1].Seq, 0
-		default:
-			return
-		}
+	lines := m.fromTop(n + m.lastH + 1)
+	if len(lines) == 0 {
+		return
 	}
+	below := -m.topRow
+	for _, l := range lines {
+		below += len(m.rowsOf(l))
+	}
+	i := 0
+	for range n {
+		if below <= m.lastH {
+			break
+		}
+		if m.topRow+1 < len(m.rowsOf(lines[i])) {
+			m.topRow++
+		} else if i+1 < len(lines) {
+			i++
+			m.topRow = 0
+		} else {
+			break
+		}
+		below--
+	}
+	m.top = lines[i].Seq
 }
 
 // fromTop returns up to n lines starting at the anchor line.

@@ -63,6 +63,28 @@ func BenchmarkRedraw(b *testing.B) {
 	}
 }
 
+// BenchmarkPageDown pages down once per iteration on the All source.
+// The target is under 2 ms per keypress.
+func BenchmarkPageDown(b *testing.B) {
+	m := New(benchStore(b), mono(b))
+	m.SetSource(logstore.Source{All: true}, "All Resources")
+	m.View(140, 50, true)
+	m.follow = false
+	m.top, m.topRow = 0, 0
+	m.normalize()
+	start := m.top
+	b.ResetTimer()
+	for b.Loop() {
+		m.down(50)
+		if m.top == start {
+			b.Fatal("down(50) did not move")
+		}
+		b.StopTimer()
+		m.top, m.topRow = start, 0
+		b.StartTimer()
+	}
+}
+
 // BenchmarkRedrawSearch redraws with an active search whose matches are
 // on screen. Each round sets a new query, so every visible line is
 // matched and highlighted again.

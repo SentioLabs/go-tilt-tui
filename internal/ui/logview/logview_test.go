@@ -321,3 +321,49 @@ func TestScrollbar(t *testing.T) {
 		t.Fatalf("top bar = %q", got)
 	}
 }
+
+// TestDownMatchesSingleSteps checks that down(n) lands where n calls of
+// down(1) land. Every seventh line wraps to three rows at width 40.
+func TestDownMatchesSingleSteps(t *testing.T) {
+	var texts []string
+	for i := 1; i <= 120; i++ {
+		if i%7 == 3 {
+			texts = append(texts, strings.Repeat("x", 100))
+			continue
+		}
+		texts = append(texts, fmt.Sprintf("line %d", i))
+	}
+	s := logstore.New(logstore.Options{})
+	feed(t, s, true, texts...)
+	newModel := func() *Model {
+		m := New(s, mono(t))
+		m.SetSource(logstore.Source{All: true}, "All Resources")
+		m.View(40, 10, true)
+		m.HandleKey(key("g"))
+		return m
+	}
+	if got := len(newModel().rowsOf(s.Next(logstore.Source{All: true}, 0, 3)[2])); got != 3 {
+		t.Fatalf("wrapped line has %d rows, want 3", got)
+	}
+	type pos struct {
+		top    logstore.Seq
+		topRow int
+	}
+	multi, single := newModel(), newModel()
+	steps := 0
+	for _, n := range []int{1, 1, 1, 1, 1, 10, 1000} {
+		multi.down(n)
+		for range n {
+			single.down(1)
+		}
+		steps += n
+		got, exp := pos{multi.top, multi.topRow}, pos{single.top, single.topRow}
+		if got != exp {
+			t.Fatalf("after %d rows: down(%d) at %+v, single steps at %+v", steps, n, got, exp)
+		}
+	}
+	// The last screen holds lines 113 to 120: line 115 takes three rows.
+	if got := (pos{multi.top, multi.topRow}); got != (pos{113, 0}) {
+		t.Fatalf("down(1000) stopped at %+v, want line 113 row 0", got)
+	}
+}
