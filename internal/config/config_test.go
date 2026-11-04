@@ -140,3 +140,57 @@ func TestMinimumBufferSize(t *testing.T) {
 		t.Fatal("negative size accepted")
 	}
 }
+
+func TestMouseWheelList(t *testing.T) {
+	tests := []struct {
+		name     string
+		body     string
+		want     string
+		warnWith []string // substrings of the one expected warning; nil means none
+	}{
+		{"no key", `theme = "mono"`, "cursor", nil},
+		{"cursor", `mouseWheelList = "cursor"`, "cursor", nil},
+		{"scroll", `mouseWheelList = "scroll"`, "scroll", nil},
+		{"unknown", `mouseWheelList = "page"`, "cursor", []string{"mouseWheelList", `"page"`}},
+		{"case sensitive", `mouseWheelList = "Scroll"`, "cursor", []string{"mouseWheelList", `"Scroll"`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, dir, "config.toml", tt.body)
+			l, err := Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if l.Config.MouseWheelList != tt.want {
+				t.Errorf("MouseWheelList = %q, want %q", l.Config.MouseWheelList, tt.want)
+			}
+			if tt.warnWith == nil {
+				if len(l.Warnings) != 0 {
+					t.Errorf("Warnings = %q, want none", l.Warnings)
+				}
+				return
+			}
+			if len(l.Warnings) != 1 {
+				t.Fatalf("Warnings = %q, want exactly one", l.Warnings)
+			}
+			for _, s := range tt.warnWith {
+				if !strings.Contains(l.Warnings[0], s) {
+					t.Errorf("warning %q does not contain %q", l.Warnings[0], s)
+				}
+			}
+		})
+	}
+}
+
+func TestMouseWheelListJSON(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "config.json", `{"mouseWheelList": "scroll"}`)
+	l, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Config.MouseWheelList != "scroll" {
+		t.Fatalf("MouseWheelList = %q, want scroll", l.Config.MouseWheelList)
+	}
+}

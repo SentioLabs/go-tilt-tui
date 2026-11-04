@@ -18,12 +18,16 @@ import (
 // minBytesPerResource is the smallest per-resource log buffer Load accepts.
 const minBytesPerResource = 256 << 10
 
+// WheelModes are the mouseWheelList values, the default first.
+var WheelModes = []string{"cursor", "scroll"}
+
 // Config uses tilt-tui's key names so existing settings carry over.
 type Config struct {
 	Theme                  string              `toml:"theme" json:"theme"`
 	TiltBinaryPath         string              `toml:"tiltBinaryPath" json:"tiltBinaryPath"`
 	LogFilters             map[string][]string `toml:"logFilters" json:"logFilters"`
 	LogMaxBytesPerResource int                 `toml:"logMaxBytesPerResource" json:"logMaxBytesPerResource"`
+	MouseWheelList         string              `toml:"mouseWheelList" json:"mouseWheelList"`
 }
 
 // Filter is one named logFilters entry, compiled with RE2.
@@ -90,6 +94,14 @@ func Load(dir string) (Loaded, error) {
 		l.Config.LogMaxBytesPerResource = minBytesPerResource
 		l.Warnings = append(l.Warnings, fmt.Sprintf(
 			"logMaxBytesPerResource raised from %d to %d (the minimum)", n, minBytesPerResource))
+	}
+
+	switch v := l.Config.MouseWheelList; {
+	case v == "":
+		l.Config.MouseWheelList = WheelModes[0]
+	case !slices.Contains(WheelModes, v):
+		l.Config.MouseWheelList = WheelModes[0]
+		l.Warnings = append(l.Warnings, fmt.Sprintf("mouseWheelList %q is not cursor or scroll, using cursor", v))
 	}
 	return l, nil
 }
