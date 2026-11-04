@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/SentioLabs/go-tilt-tui/compare/v0.2.0...v0.3.0) (2026-11-04)
+
+
+### Features
+
+* **ui:** move the list cursor with the mouse wheel ([d035007](https://github.com/SentioLabs/go-tilt-tui/commit/d035007f496469461b06945e099cee53cd011ccb))
+
 ## [0.2.0](https://github.com/SentioLabs/go-tilt-tui/compare/v0.1.1...v0.2.0) (2026-11-04)
 
 
