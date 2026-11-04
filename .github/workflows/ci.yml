@@ -1,0 +1,98 @@
+name: CI
+
+# Pull requests, a weekly run (new advisories surface without a code
+# change) and release.yml, which calls this before release-please.
+on:
+  pull_request:
+    branches: [main]
+  workflow_call: {}
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.10.19
+          install_args: go aqua:koalaman/shellcheck aqua:rhysd/actionlint
+      - id: gocache
+        run: |
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.mod }}
+            ${{ steps.gocache.outputs.build }}
+          key: go-check-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+      - run: make fmt-check tidy-check vet test pin-check shellcheck actionlint install-test
+
+  install-test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Runs the shasum -a 256 path on real macOS bash 3.2. Needs no tools.
+      - run: make install-test
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.10.19
+          install_args: go aqua:golangci/golangci-lint
+      - id: gocache
+        run: |
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.mod }}
+            ${{ steps.gocache.outputs.build }}
+          key: go-lint-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+      - run: make lint
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Go must be installed so osv-scanner's call analysis runs.
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.10.19
+          install_args: go aqua:google/osv-scanner
+      - id: gocache
+        run: |
+          echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+          echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.gocache.outputs.mod }}
+            ${{ steps.gocache.outputs.build }}
+          key: go-vuln-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.sum') }}
+      - run: make vuln

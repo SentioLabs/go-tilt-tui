@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # Dependabot doesn't read mise.toml. Tool bumps are manual: edit
+  # mise.toml, run `mise lock`, commit as chore(mise).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    # Wait 7 days before proposing a new version so a hijacked release
+    # has time to be caught. Security updates bypass the cooldown.
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      gomod:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
