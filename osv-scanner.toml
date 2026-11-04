@@ -7,7 +7,8 @@
 # Scan the standard library too. osv-scanner drops stdlib from a go.mod scan
 # unless ScanGoModVersion is set. It matches stdlib advisories at the go.mod
 # `go` line, and call analysis judges them at GoVersionOverride.
-# A Go bump in mise.toml changes GoVersionOverride in the same commit.
-# vuln_scan.sh fails when this differs from `go env GOVERSION`.
+# So the go line in go.mod, go in mise.toml and GoVersionOverride move
+# together in one commit. vuln_scan.sh fails when any of them differs from
+# `go env GOVERSION`.
 ScanGoModVersion = true
 GoVersionOverride = "1.27.3"

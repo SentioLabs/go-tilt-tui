@@ -44,12 +44,15 @@ done
 
 # Call analysis judges stdlib advisories at GoVersionOverride. That must be
 # the Go that builds the release.
+# osv-scanner 2.7.0: its enricher matches stdlib before filterAndOverrideGoVersion.
 override="$(sed -n 's/^GoVersionOverride *= *"\(.*\)"/\1/p' "$CONFIG")"
+gomod="$(sed -n 's/^go \([^ ]*\)$/\1/p' go.mod)"
 installed="$(go env GOVERSION)"
 installed="${installed#go}"
-if [ "$override" != "$installed" ]; then
-  echo "ERROR: GoVersionOverride in $CONFIG is '$override' but the installed Go is '$installed'." >&2
-  echo "       Bump GoVersionOverride in osv-scanner.toml with the Go version in mise.toml." >&2
+if [ "$gomod" != "$installed" ] || [ "$override" != "$installed" ]; then
+  echo "ERROR: Go versions differ. go.mod go line: '$gomod'. Installed Go: '$installed'. GoVersionOverride in $CONFIG: '$override'." >&2
+  echo "       osv-scanner 2.7.0 matches stdlib advisories against the go line in go.mod, so the three must move together." >&2
+  echo "       Bump the go line in go.mod, go in mise.toml and GoVersionOverride in osv-scanner.toml together." >&2
   exit 1
 fi
 
