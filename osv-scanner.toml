@@ -1,0 +1,13 @@
+# osv-scanner config for scripts/vuln_scan.sh.
+#
+# Rule for ignores: every [[IgnoredVulns]] entry has a `reason` that says
+# why the advisory can't affect this build, and an `ignoreUntil` date no
+# more than 90 days out. Today there are none.
+#
+# Scan the standard library too. osv-scanner drops stdlib from a go.mod scan
+# unless ScanGoModVersion is set. It matches stdlib advisories at the go.mod
+# `go` line, and call analysis judges them at GoVersionOverride.
+# A Go bump in mise.toml changes GoVersionOverride in the same commit.
+# vuln_scan.sh fails when this differs from `go env GOVERSION`.
+ScanGoModVersion = true
+GoVersionOverride = "1.27.3"
