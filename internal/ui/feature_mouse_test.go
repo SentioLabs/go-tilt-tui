@@ -73,7 +73,8 @@ func TestClickHeaderSelectsThenToggles(t *testing.T) {
 
 func TestClickOutsideRowsDoesNothing(t *testing.T) {
 	m := mouseSetup(t, 140, 20)
-	m = press(m, "j", "j") // ▼ backend, api
+	// j j moves the cursor to ▼ backend, then to api.
+	m = press(m, "j", "j")
 	for _, y := range []int{0, 15, 17, 18, 19} { // title, empty line, status line, bottom border, footer
 		m = clickAt(m, 3, y, tea.MouseLeft)
 		if r := m.list.SelectedResource(); r == nil || r.Name() != "api" {
