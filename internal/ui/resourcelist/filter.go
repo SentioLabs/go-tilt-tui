@@ -63,5 +63,6 @@ func (m *Model) SetFilter(f Filter) {
 		return
 	}
 	m.filter = f
+	m.free = false
 	m.refilter()
 }

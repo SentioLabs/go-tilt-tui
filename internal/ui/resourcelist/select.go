@@ -13,6 +13,7 @@ func (m *Model) Select(name string) bool {
 			}
 			delete(m.collapsed, g.name)
 			m.target = target{kind: rowResource, name: name}
+			m.free = false
 			if !m.visible(r) {
 				m.pinned = name
 			}

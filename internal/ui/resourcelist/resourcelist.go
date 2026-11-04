@@ -88,6 +88,7 @@ type Model struct {
 	pinnedGroup string
 
 	offset    int  // first row drawn by View
+	free      bool // ScrollView set offset; View doesn't pull it to the cursor
 	lastH     int  // list lines drawn by the last View
 	showsTime bool // the last View drew a relative time
 }
@@ -275,6 +276,7 @@ func (m *Model) syncCursor() {
 // moveTo puts the cursor on row i.
 func (m *Model) moveTo(i int) {
 	m.cursor = max(0, min(i, len(m.rows)-1))
+	m.free = false
 	m.syncCursor()
 	m.dropStalePin()
 }
@@ -320,6 +322,7 @@ func (m *Model) HandleKey(k tea.KeyPressMsg) (selectionChanged bool) {
 	default:
 		return false
 	}
+	m.free = false
 	return m.source != before
 }
 
@@ -332,12 +335,25 @@ func (m *Model) ClickRow(i int) bool {
 	if i < 0 || i >= m.lastH || ri >= len(m.rows) {
 		return false
 	}
+	m.free = false
 	if ri == m.cursor && m.OnHeader() {
 		m.toggleGroup()
 		return true
 	}
 	m.moveTo(ri)
 	return true
+}
+
+// ScrollView moves the drawn rows d lines, down for d > 0, without
+// moving the cursor. It stops when the first or last row reaches the
+// pane edge. The view stays put until the next cursor move, click or
+// filter change.
+func (m *Model) ScrollView(d int) {
+	if m.lastH == 0 {
+		return
+	}
+	m.offset = max(0, min(m.offset+d, len(m.rows)-m.lastH))
+	m.free = true
 }
 
 // MoveCursor moves the cursor d rows, down for d > 0, and stops at the
@@ -383,7 +399,7 @@ func (m *Model) Counts() Counts {
 }
 
 // View returns exactly h lines, each at most w cells wide, scrolled so the
-// cursor row is visible.
+// cursor row is visible. After ScrollView it keeps the scrolled offset.
 func (m *Model) View(w, h int, focused bool, now time.Time) string {
 	m.showsTime = false
 	if h <= 0 {
@@ -391,11 +407,13 @@ func (m *Model) View(w, h int, focused bool, now time.Time) string {
 		return ""
 	}
 	m.lastH = h
-	if m.cursor < m.offset {
-		m.offset = m.cursor
-	}
-	if m.cursor >= m.offset+h {
-		m.offset = m.cursor - h + 1
+	if !m.free {
+		if m.cursor < m.offset {
+			m.offset = m.cursor
+		}
+		if m.cursor >= m.offset+h {
+			m.offset = m.cursor - h + 1
+		}
 	}
 	m.offset = max(0, min(m.offset, len(m.rows)-h))
 

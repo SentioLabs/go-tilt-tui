@@ -577,3 +577,190 @@ func TestMoveCursor(t *testing.T) {
 		t.Fatalf("down past the end: %+v", m.Selected())
 	}
 }
+
+// letters returns ungrouped resources named a, b, c and so on.
+func letters(n int) []tilt.Resource {
+	var rs []tilt.Resource
+	for i := range n {
+		rs = append(rs, res(string(rune('a'+i))))
+	}
+	return rs
+}
+
+// cursorDrawn reports whether the last View drew the cursor row.
+func cursorDrawn(m *Model) bool {
+	return m.cursor >= m.offset && m.cursor < m.offset+m.lastH
+}
+
+func TestScrollViewMovesRowsNotCursor(t *testing.T) {
+	m := newList(t, letters(10)...) // rows: All, a .. j
+	plain(m, 30, 3)
+	m.ScrollView(1)
+	got := plain(m, 30, 3)
+	if strings.TrimRight(got[0], " ") != "●  a" {
+		t.Fatalf("line 0 = %q, want row a: %q", got[0], got)
+	}
+	if !m.Selected().All || m.cursor != 0 {
+		t.Fatalf("ScrollView moved the cursor: cursor %d, Selected %+v", m.cursor, m.Selected())
+	}
+}
+
+func TestScrollViewStopsAtEnds(t *testing.T) {
+	m := newList(t, letters(10)...) // rows: All, a .. j
+	m.ScrollView(1)                 // before any View: no pane height yet
+	if got := plain(m, 30, 3); strings.TrimRight(got[0], " ") != "All Resources" {
+		t.Fatalf("ScrollView before View changed the view: %q", got)
+	}
+	for range 50 {
+		m.ScrollView(1)
+	}
+	got := plain(m, 30, 3)
+	if strings.TrimRight(got[0], " ") != "●  h" || strings.TrimRight(got[2], " ") != "●  j" {
+		t.Fatalf("scrolled past the last row: %q", got)
+	}
+	for range 50 {
+		m.ScrollView(-1)
+	}
+	if got := plain(m, 30, 3); strings.TrimRight(got[0], " ") != "All Resources" || m.offset != 0 {
+		t.Fatalf("scrolled past the first row: offset %d, %q", m.offset, got)
+	}
+}
+
+func TestScrollViewSurvivesSnapshot(t *testing.T) {
+	rs := letters(10) // rows: All, a .. j
+	m := newList(t, rs...)
+	plain(m, 30, 3)
+	m.ScrollView(5)
+	plain(m, 30, 3)
+	m.SetResources(rs)
+	got := plain(m, 30, 3)
+	if m.offset != 5 || strings.TrimRight(got[0], " ") != "●  e" {
+		t.Fatalf("snapshot moved the view: offset %d, %q", m.offset, got)
+	}
+}
+
+func TestScrollViewKeptByUnhandledKeys(t *testing.T) {
+	m := newList(t, letters(10)...) // rows: All, a .. j
+	m.HandleKey(key("j"))           // a
+	plain(m, 30, 3)
+	m.ScrollView(5)
+	m.HandleKey(key("enter")) // not a header
+	m.HandleKey(key("x"))
+	plain(m, 30, 3)
+	if m.offset != 5 {
+		t.Fatalf("an unhandled key moved the view: offset %d", m.offset)
+	}
+}
+
+func TestScrollViewSnapsBackOnKey(t *testing.T) {
+	m := newList(t, letters(10)...) // rows: All, a .. j
+	m.HandleKey(key("j"))           // a
+	plain(m, 30, 3)
+	m.ScrollView(5)
+	plain(m, 30, 3)
+	if cursorDrawn(m) {
+		t.Fatal("setup: cursor still on screen after scrolling")
+	}
+	m.HandleKey(key("j"))
+	if m.Selected() != (logstore.Source{Resource: "b"}) {
+		t.Fatalf("j did not move from the selected row: %+v", m.Selected())
+	}
+	got := plain(m, 30, 3)
+	if !cursorDrawn(m) || !slices.ContainsFunc(got, func(l string) bool { return strings.TrimRight(l, " ") == "●  b" }) {
+		t.Fatalf("cursor row b not drawn: offset %d, %q", m.offset, got)
+	}
+}
+
+// groupedRows returns n groups g0 .. g(n-1) of four resources each.
+func groupedRows(n int) []tilt.Resource {
+	var rs []tilt.Resource
+	for g := range n {
+		for r := range 4 {
+			rs = append(rs, res(fmt.Sprintf("g%d-r%d", g, r), labels("app", fmt.Sprintf("g%d", g))))
+		}
+	}
+	return rs
+}
+
+func TestScrollViewClearedBy(t *testing.T) {
+	const h = 4
+	tests := []struct {
+		name   string
+		setup  func(m *Model) // puts the cursor where the action needs it
+		action func(m *Model)
+	}{
+		{"enter on a header", func(m *Model) { m.HandleKey(key("j")) }, func(m *Model) { m.HandleKey(key("enter")) }},
+		{"e", func(*Model) {}, func(m *Model) { m.HandleKey(key("e")) }},
+		{"c", func(*Model) {}, func(m *Model) { m.HandleKey(key("c")) }},
+		{"d", func(*Model) {}, func(m *Model) { m.HandleKey(key("d")) }},
+		{"ClickRow", func(*Model) {}, func(m *Model) {
+			if !m.ClickRow(3) { // row 13, g2-r1
+				t.Fatal("click on a drawn line reported no row")
+			}
+			// The clicked row is drawn either way. Move it above the view
+			// with a snapshot, which a scrolled view ignores.
+			plain(m, 30, h)
+			m.SetResources(groupedRows(5)[8:])
+		}},
+		{"MoveCursor", func(*Model) {}, func(m *Model) { m.MoveCursor(1) }},
+		{"SetFilter", func(*Model) {}, func(m *Model) { m.SetFilter(FilterHealthy) }},
+		{"Select", func(*Model) {}, func(m *Model) {
+			if !m.Select("g4-r3") {
+				t.Fatal("Select found no g4-r3")
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// rows: All, then a header and four resources per group: 26
+			m := newList(t, groupedRows(5)...)
+			tt.setup(m)
+			plain(m, 30, h)
+			m.ScrollView(10)
+			plain(m, 30, h)
+			if cursorDrawn(m) {
+				t.Fatalf("setup: cursor %d on screen at offset %d", m.cursor, m.offset)
+			}
+			tt.action(m)
+			plain(m, 30, h)
+			if !cursorDrawn(m) {
+				t.Fatalf("view stayed scrolled: cursor %d, offset %d", m.cursor, m.offset)
+			}
+		})
+	}
+	// A click on the selected header toggles the group without moving the
+	// cursor, so the cursor stays drawn. A later snapshot that moves the
+	// header above the view shows whether the click released the view.
+	t.Run("ClickRow on the selected header", func(t *testing.T) {
+		m := newList(t, groupedRows(5)...)
+		m.Select("g2-r0")
+		m.HandleKey(key("k")) // header g2, row 11
+		plain(m, 30, h)       // offset 8
+		m.ScrollView(1)
+		plain(m, 30, h)
+		if !m.ClickRow(2) || !m.collapsed["g2"] {
+			t.Fatal("click on the selected header did not toggle it")
+		}
+		plain(m, 30, h)
+		m.SetResources(groupedRows(5)[8:]) // header g2 is now row 1
+		plain(m, 30, h)
+		if !cursorDrawn(m) {
+			t.Fatalf("view stayed scrolled: cursor %d, offset %d", m.cursor, m.offset)
+		}
+	})
+}
+
+func TestScrollViewClampsAfterRowsShrink(t *testing.T) {
+	m := newList(t, letters(10)...) // rows: All, a .. j
+	plain(m, 30, 3)
+	for range 20 {
+		m.ScrollView(1)
+	}
+	plain(m, 30, 3)
+	m.SetResources(letters(5)) // rows: All, a .. e
+	for i, l := range plain(m, 30, 3) {
+		if l == "" {
+			t.Fatalf("line %d blank with rows left to fill it (offset %d)", i, m.offset)
+		}
+	}
+}
