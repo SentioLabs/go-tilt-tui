@@ -18,6 +18,9 @@ type restartState struct {
 	requested bool // R was pressed and main hasn't answered yet
 }
 
+// restartingText is the flash R shows while main restarts tilt.
+const restartingText = "restarting tilt…"
+
 func init() { register(restartFeature()) }
 
 // restartStateOf returns m's restart state.
@@ -40,7 +43,7 @@ func restartFeature() Feature {
 				ID: "restart", Title: "restart tilt", Keys: []string{"R"}, Scope: command.ScopeGlobal,
 				Run: func(command.Context) tea.Cmd {
 					st.requested = true
-					return tea.Batch(m.flashCmd("restarting tilt…", 0), msgCmd(RestartRequestMsg{}))
+					return tea.Batch(m.flashCmd(restartingText, 0), msgCmd(RestartRequestMsg{}))
 				},
 			}}
 		},
@@ -53,6 +56,11 @@ func restartFeature() Feature {
 				*st = restartState{}
 			case ChildExitedMsg:
 				*st = restartState{exited: true}
+				// A restart that fails fast exits while its flash still shows.
+				// Clear it so the footer shows the R hint again.
+				if m.flashActive() && m.flash == restartingText {
+					m.setFlash("", m.d.Now(), 0)
+				}
 			}
 			return nil, false
 		},

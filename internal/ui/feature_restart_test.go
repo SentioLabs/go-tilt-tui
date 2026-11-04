@@ -80,6 +80,31 @@ func TestRestartAfterExit(t *testing.T) {
 	}
 }
 
+func TestRestartFailureShowsHintAtOnce(t *testing.T) {
+	m := restartModel(t)
+	m, _ = send(m, ChildStartedMsg{})
+	m, _ = send(m, ChildExitedMsg{Code: 1})
+	m, asked := pressR(m)
+	if !asked {
+		t.Fatal("R did not ask for a restart")
+	}
+	m, _ = send(m, ChildStartedMsg{})
+	m, _ = send(m, ChildExitedMsg{Code: 1})
+	if f := footerLine(m); !strings.Contains(f, "R restart tilt") {
+		t.Fatalf("footer = %q, want the R hint right after a failed restart", f)
+	}
+}
+
+func TestChildExitKeepsOtherFlash(t *testing.T) {
+	m := restartModel(t)
+	m, _ = send(m, ChildStartedMsg{})
+	m, _ = send(m, flashMsg{text: "triggering api…", at: m.d.Now()})
+	m, _ = send(m, ChildExitedMsg{Code: 1})
+	if f := footerLine(m); !strings.Contains(f, "triggering api…") {
+		t.Fatalf("footer = %q, want the other flash kept", f)
+	}
+}
+
 func TestRestartStoreResetsOnNewSnapshot(t *testing.T) {
 	m := restartModel(t)
 	m, _ = send(m, ChildStartedMsg{})
