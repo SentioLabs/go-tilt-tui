@@ -129,6 +129,7 @@ func run() error {
 		Open:         proc.OpenURL,
 		Dependencies: client.ResourceDependencies,
 		FileWatches:  fileWatches(opts.allowRemote, opts.port, findTilt),
+		WheelList:    loaded.Config.MouseWheelList,
 	}), programOptions(sup)...)
 	loop := &watchLoop{run: func(ctx context.Context) { watch(ctx, client, p) }}
 

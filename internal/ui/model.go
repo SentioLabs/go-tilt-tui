@@ -90,6 +90,10 @@ type Deps struct {
 	// file-watch panel shows "file-watch info needs a local Tilt", which
 	// is what --allow-remote gets.
 	FileWatches func(ctx context.Context) ([]tilt.FileWatch, error)
+	// WheelList is the mouseWheelList setting: "cursor" moves the list
+	// cursor on a wheel notch over the list, "scroll" scrolls the list
+	// view. "" means "cursor".
+	WheelList string
 }
 
 type connState int

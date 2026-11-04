@@ -1,13 +1,16 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/sentiolabs/go-tilt-tui/internal/config"
 	"github.com/sentiolabs/go-tilt-tui/internal/ui/command"
+	"github.com/sentiolabs/go-tilt-tui/internal/ui/overlay"
 )
 
 // mouseSetup is setup with only the mouse feature, at w x h.
@@ -231,5 +234,161 @@ func TestWheelOnFooterDoesNothing(t *testing.T) {
 	// A header keeps the source of the row above, so check OnHeader too.
 	if !m.list.Selected().All || m.list.OnHeader() {
 		t.Fatalf("wheel on the footer moved the cursor: %+v", m.list.Selected())
+	}
+}
+
+// scrollSetup is setup with only the mouse feature in scroll mode, at w
+// x h.
+func scrollSetup(t *testing.T, w, h int) Model {
+	t.Helper()
+	withFeatures(t, mouseFeature)
+	m, _ := setup(t, w, h, Deps{WheelList: "scroll"})
+	return m
+}
+
+// panes splits the screen rows below the title line into the list pane
+// part and the log pane part.
+func panes(m Model) (list, logs []string) {
+	lw := listWidth(m.width)
+	for _, l := range strings.Split(screen(m), "\n")[1:] {
+		list = append(list, ansi.Cut(l, 0, lw))
+		logs = append(logs, ansi.Cut(l, lw, m.width))
+	}
+	return list, logs
+}
+
+// listRows is the number of list rows the pane draws: the lines from the
+// one below the title through the one above the status line.
+func listRows(t *testing.T, m Model) int {
+	t.Helper()
+	return listRow(t, m, "● live") - 1
+}
+
+func TestWheelModesMatchConfig(t *testing.T) {
+	if !slices.Equal(wheelModes, config.WheelModes) {
+		t.Fatalf("wheelModes %q, config.WheelModes %q", wheelModes, config.WheelModes)
+	}
+}
+
+func TestWheelScrollModeScrollsList(t *testing.T) {
+	m := scrollSetup(t, 140, 8)
+	n := listRows(t, m)
+	if n >= 7 {
+		t.Fatalf("the list pane draws %d rows, want fewer than 7:\n%s", n, screen(m))
+	}
+	beforeList, beforeLogs := panes(m)
+	m = wheel(m, 3, 2, tea.MouseWheelDown)
+	afterList, afterLogs := panes(m)
+	for i := range n - 1 {
+		if afterList[i] != beforeList[i+1] {
+			t.Fatalf("one notch down did not shift the list one line:\nbefore\n%s\nafter\n%s",
+				strings.Join(beforeList, "\n"), strings.Join(afterList, "\n"))
+		}
+	}
+	if !m.list.Selected().All || m.list.OnHeader() {
+		t.Fatalf("scroll mode moved the selection: %+v", m.list.Selected())
+	}
+	if !slices.Equal(afterLogs, beforeLogs) {
+		t.Fatalf("scroll mode changed the log pane:\n%s", screen(m))
+	}
+
+	for range 50 {
+		m = wheel(m, 3, 2, tea.MouseWheelDown)
+	}
+	last := listRow(t, m, "(Tiltfile)")
+	if last != n {
+		t.Fatalf("(Tiltfile) on line %d after scrolling down, want the last list line %d:\n%s", last, n, screen(m))
+	}
+	if !m.list.Selected().All || m.list.OnHeader() {
+		t.Fatalf("scrolling down moved the selection: %+v", m.list.Selected())
+	}
+
+	for range 50 {
+		m = wheel(m, 3, 2, tea.MouseWheelUp)
+	}
+	if first := listRow(t, m, "All Resources"); first != 1 {
+		t.Fatalf("All Resources on line %d after scrolling up, want 1:\n%s", first, screen(m))
+	}
+}
+
+func TestWheelScrollModeOverLogsScrollsLogs(t *testing.T) {
+	m := scrollSetup(t, 140, 20)
+	m = wheel(m, 100, 5, tea.MouseWheelUp)
+	if !m.list.Selected().All {
+		t.Fatalf("wheel over the logs moved the cursor: %+v", m.list.Selected())
+	}
+	if s := screen(m); strings.Contains(s, "[follow]") {
+		t.Fatalf("wheel up over the logs did not scroll them:\n%s", s)
+	}
+}
+
+func TestWheelScrollModeClickSelects(t *testing.T) {
+	m := scrollSetup(t, 140, 8)
+	for range 10 {
+		m = wheel(m, 3, 2, tea.MouseWheelDown)
+	}
+	m = clickAt(m, 3, listRow(t, m, "web"), tea.MouseLeft)
+	if r := m.list.SelectedResource(); r == nil || !strings.HasPrefix(r.Name(), "web") {
+		t.Fatalf("click after scrolling did not select web: %v", r)
+	}
+	if s := screen(m); !strings.Contains(s, "web ready") || strings.Contains(s, "api starting") {
+		t.Fatalf("log pane not filtered to web:\n%s", s)
+	}
+}
+
+func TestWheelScrollModeSnapshotKeepsViewKeySnapsBack(t *testing.T) {
+	m := scrollSetup(t, 140, 8)
+	for range 10 {
+		m = wheel(m, 3, 2, tea.MouseWheelDown)
+	}
+	before, _ := panes(m)
+	if strings.Contains(strings.Join(before, "\n"), "All Resources") {
+		t.Fatalf("the cursor row is still on screen:\n%s", screen(m))
+	}
+	m, _ = send(m, snapshot(t, true))
+	if after, _ := panes(m); !slices.Equal(after[:listRows(t, m)], before[:listRows(t, m)]) {
+		t.Fatalf("a snapshot moved the scrolled view:\n%s", screen(m))
+	}
+	m = press(m, "j")
+	if !m.list.OnHeader() {
+		t.Fatalf("j did not move to the backend header: %+v", m.list.Selected())
+	}
+	_ = listRow(t, m, "▼ backend")
+}
+
+func TestSettingMsgChangesWheelMode(t *testing.T) {
+	m := mouseSetup(t, 140, 8)
+	nm, cmd := m.Update(overlay.SettingMsg{Key: "mouseWheelList", Value: "scroll"})
+	m = nm.(Model)
+	msgs := drain(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("SettingMsg produced %d messages, want one flash", len(msgs))
+	}
+	f, ok := msgs[0].(flashMsg)
+	if !ok || !strings.Contains(f.text, "scroll") || !strings.Contains(f.text, "mouseWheelList") {
+		t.Fatalf("flash %+v does not name scroll and mouseWheelList", msgs[0])
+	}
+	m = wheel(m, 3, 2, tea.MouseWheelDown)
+	if !m.list.Selected().All || m.list.OnHeader() {
+		t.Fatalf("a notch after switching to scroll moved the selection: %+v", m.list.Selected())
+	}
+
+	if cmd, handled := mouseFeature.Update(&m, overlay.SettingMsg{Key: "mouseWheelList", Value: "page"}); cmd != nil || !handled {
+		t.Fatalf("unknown value: cmd %v, handled %v, want nil and true", cmd, handled)
+	}
+	if got := wheelMode(&m); got != "scroll" {
+		t.Fatalf("unknown value changed the mode to %q", got)
+	}
+	if _, handled := mouseFeature.Update(&m, overlay.SettingMsg{Key: "theme", Value: "cursor"}); handled {
+		t.Fatal("the mouse feature handled another setting")
+	}
+	if got := wheelMode(&m); got != "scroll" {
+		t.Fatalf("another setting changed the mode to %q", got)
+	}
+
+	m, _ = send(m, overlay.SettingMsg{Key: "mouseWheelList", Value: "cursor"})
+	m = wheel(m, 3, 2, tea.MouseWheelDown)
+	if !m.list.OnHeader() {
+		t.Fatalf("a notch after switching back to cursor did not move it: %+v", m.list.Selected())
 	}
 }
