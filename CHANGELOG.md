@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.1](https://github.com/SentioLabs/go-tilt-tui/compare/v0.1.0...v0.1.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **termsafe:** bound the C1 rescan and fail closed ([937b85c](https://github.com/SentioLabs/go-tilt-tui/commit/937b85c6373cee4e7f31dbb8087bcfd54ad43b8e))
+* **termsafe:** drop strings opened by C1 introducers ([0dea1af](https://github.com/SentioLabs/go-tilt-tui/commit/0dea1afcce961c7cc9a3452b5ca2d394a4e51caa))
+* **termsafe:** rescan for C1 strings joined by a removal ([3eb38b3](https://github.com/SentioLabs/go-tilt-tui/commit/3eb38b384c7414d5ab563f70da10954f8731061c))
+* **ui:** order the restart flash before the request ([40c5b44](https://github.com/SentioLabs/go-tilt-tui/commit/40c5b4446cc9a9ffa6fc9d84513ef3c4bb34f23a))
+* **ui:** show the R hint as soon as a restart fails ([449d376](https://github.com/SentioLabs/go-tilt-tui/commit/449d376f6abf26cfed5bfb07203dad4641289812))
+
+
+### Performance
+
+* **logview:** fetch lines once per page down ([ccabc07](https://github.com/SentioLabs/go-tilt-tui/commit/ccabc07f6fac9d9ce8dbb791ba1ada41dda3f0e4))
+
 ## 0.1.0 (2026-11-04)
 
 
