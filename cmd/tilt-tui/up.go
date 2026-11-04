@@ -35,6 +35,7 @@ type options struct {
 	allowRemote bool
 	up          bool
 	tiltArgs    []string // everything after "--", for `tilt up`
+	version     bool     // print the version and exit
 }
 
 // parseFlags parses args (without the program name). Everything after
@@ -52,6 +53,7 @@ func parseFlags(args []string, out io.Writer) (options, error) {
 	fs.IntVar(&o.port, "port", defaultPort(), "Tilt API port (default from $TILT_PORT, else 10350)")
 	fs.BoolVar(&o.allowRemote, "allow-remote", false, "allow a non-loopback --host; Tilt's tokens then travel unencrypted")
 	fs.BoolVar(&o.up, "up", false, "start `tilt up --port PORT ARGS...` with the ARGS after --, and stop it on quit")
+	fs.BoolVar(&o.version, "version", false, "print the version and exit")
 	if err := fs.Parse(own); err != nil {
 		return options{}, err
 	}

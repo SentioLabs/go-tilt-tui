@@ -22,6 +22,7 @@ import (
 	"github.com/sentiolabs/go-tilt-tui/internal/tilt"
 	"github.com/sentiolabs/go-tilt-tui/internal/ui"
 	"github.com/sentiolabs/go-tilt-tui/internal/ui/theme"
+	"github.com/sentiolabs/go-tilt-tui/internal/version"
 )
 
 // checkHostTimeout bounds the startup loopback check.
@@ -49,6 +50,10 @@ func run() error {
 	}
 	if err != nil {
 		return err
+	}
+	if opts.version {
+		fmt.Println(version.String())
+		return nil
 	}
 
 	dir, err := config.Dir()
