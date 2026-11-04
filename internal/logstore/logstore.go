@@ -14,7 +14,7 @@ import (
 	"github.com/sentiolabs/go-tilt-tui/internal/tilt"
 )
 
-// logLine is termsafe.LogLine. Tests swap it while termsafe is a stub.
+// logLine is termsafe.LogLine. It's a var so a test can swap the filter.
 var logLine = termsafe.LogLine
 
 // Seq orders lines across all resources. It only ever increases, and it

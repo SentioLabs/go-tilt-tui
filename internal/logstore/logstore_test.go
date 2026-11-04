@@ -3,7 +3,6 @@ package logstore
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -28,11 +27,6 @@ var (
 	_ uint32                                = Line{}.Version
 	_ int                                   = MaxLineBytes
 )
-
-func TestMain(m *testing.M) {
-	logLine = func(s string) string { return s } // remove once termsafe.LogLine lands
-	os.Exit(m.Run())
-}
 
 // --- Behaviour tests ---
 
