@@ -156,6 +156,13 @@ func TestWheelOverListMovesCursor(t *testing.T) {
 	if !m.list.OnHeader() {
 		t.Fatal("one notch up did not reach the backend header")
 	}
+	if s := screen(m); !strings.Contains(s, "[follow]") {
+		t.Fatalf("wheel up over the list scrolled the logs:\n%s", s)
+	}
+	m = wheel(m, 3, 5, tea.MouseWheelUp)
+	if !m.list.Selected().All || m.list.OnHeader() {
+		t.Fatalf("two notches up did not reach All: %+v", m.list.Selected())
+	}
 	if m.focus != command.FocusList {
 		t.Fatalf("wheel changed focus: %v", m.focus)
 	}
@@ -164,7 +171,7 @@ func TestWheelOverListMovesCursor(t *testing.T) {
 func TestWheelStopsAtEnds(t *testing.T) {
 	m := mouseSetup(t, 140, 20)
 	m = wheel(m, 3, 5, tea.MouseWheelUp)
-	if !m.list.Selected().All {
+	if !m.list.Selected().All || m.list.OnHeader() {
 		t.Fatalf("up at the top moved: %+v", m.list.Selected())
 	}
 	for range 50 {
@@ -188,6 +195,17 @@ func TestWheelOverLogsScrollsLogs(t *testing.T) {
 	}
 	if m.focus != command.FocusList {
 		t.Fatalf("wheel changed focus: %v", m.focus)
+	}
+}
+
+func TestWheelOnFirstLogColumnScrollsLogs(t *testing.T) {
+	m := mouseSetup(t, 140, 20)
+	m = wheel(m, listWidth(140), 5, tea.MouseWheelUp)
+	if !m.list.Selected().All || m.list.OnHeader() {
+		t.Fatalf("wheel on the first log column moved the cursor: %+v", m.list.Selected())
+	}
+	if s := screen(m); strings.Contains(s, "[follow]") {
+		t.Fatalf("wheel up on the first log column did not scroll the logs:\n%s", s)
 	}
 }
 
