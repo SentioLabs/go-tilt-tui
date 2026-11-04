@@ -14,7 +14,7 @@ test:
 	go test -race ./...
 
 fmt-check:
-	@out="$$(gofmt -l $(GO_FILES))"; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
+	@out="$$(gofmt -l $(GO_FILES))" || { echo "gofmt failed" >&2; exit 1; }; if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 tidy-check:
 	go mod tidy -diff
