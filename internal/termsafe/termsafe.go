@@ -12,8 +12,10 @@ import (
 
 // Text returns s with every escape sequence removed, tabs and newlines
 // turned into spaces, and other C0/C1 control characters replaced with
-// U+FFFD. Use it for names, errors, labels, URLs and paths.
+// U+FFFD. Strings opened by a C1 introducer rune are removed with their
+// payload. Use it for names, errors, labels, URLs and paths.
 func Text(s string) string {
+	s = dropC1Strings(s)
 	var b strings.Builder
 	b.Grow(len(s))
 	for len(s) > 0 {
@@ -44,9 +46,10 @@ func Text(s string) string {
 
 // LogLine returns s with SGR (colour and style) sequences kept and every
 // other escape sequence removed. Tabs expand to spaces; other control
-// characters become U+FFFD. s must be a single line without "\n".
+// characters become U+FFFD. Strings opened by a C1 introducer rune are
+// removed with their payload. s must be a single line without "\n".
 func LogLine(s string) string {
-	s = replaceC1(strings.ToValidUTF8(s, "�"))
+	s = replaceC1(dropC1Strings(strings.ToValidUTF8(s, "�")))
 
 	var b strings.Builder
 	b.Grow(len(s))
@@ -132,6 +135,63 @@ func stringLen(s string) int {
 		}
 	}
 	return len(s)
+}
+
+// dropC1Strings returns s with every C1 string removed. A C1 string
+// starts at a UTF-8 encoded DCS, SOS, OSC, PM or APC introducer
+// (U+0090, U+0098, U+009D, U+009E, U+009F). It ends after ESC \ or
+// U+009C, and an OSC also ends after BEL. Without a terminator it
+// runs to the end of s. A 7-bit string is copied through unchanged.
+// Tilt text is UTF-8, so these runes are how an 8-bit string introducer
+// reaches us.
+func dropC1Strings(s string) string {
+	if !strings.Contains(s, "\xc2") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); {
+		// A C1 introducer inside a 7-bit string is payload. Copy the
+		// string whole so the caller drops it at its own terminator.
+		if n := stringLen(s[i:]); n > 0 {
+			b.WriteString(s[i : i+n])
+			i += n
+			continue
+		}
+		if s[i] != 0xc2 || i+1 >= len(s) || !isC1StringIntro(s[i+1]) {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		osc := s[i+1] == 0x9d
+		j := i + 2
+		for ; j < len(s); j++ {
+			if s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\' {
+				j += 2
+				break
+			}
+			if s[j] == 0xc2 && j+1 < len(s) && s[j+1] == 0x9c {
+				j += 2
+				break
+			}
+			if osc && s[j] == 0x07 {
+				j++
+				break
+			}
+		}
+		i = j
+	}
+	return b.String()
+}
+
+// isC1StringIntro reports whether c is the second byte of a UTF-8
+// encoded DCS, SOS, OSC, PM or APC rune.
+func isC1StringIntro(c byte) bool {
+	switch c {
+	case 0x90, 0x98, 0x9d, 0x9e, 0x9f:
+		return true
+	}
+	return false
 }
 
 // isSafeText reports whether seq is valid UTF-8 that starts with no

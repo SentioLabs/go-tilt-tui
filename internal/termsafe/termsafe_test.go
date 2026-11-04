@@ -36,6 +36,15 @@ func TestText(t *testing.T) {
 		{"PM with non-ASCII payload removed", "a\x1b^ü\x1b\\b", "ab"},
 		{"SOS with non-ASCII payload removed", "a\x1bXü\x1b\\b", "ab"},
 		{"text after a removed string kept", "\x1b]0;✛\x07x\x1b[1my", "xy"},
+		{"C1 OSC payload removed (BEL)", "a\u009d0;x\x07b", "ab"},
+		{"C1 OSC payload removed (C1 ST)", "a\u009d0;x\u009cb", "ab"},
+		{"C1 DCS payload removed", "a\u0090q\x1b\\b", "ab"},
+		{"C1 SOS payload removed", "a\u0098q\x1b\\b", "ab"},
+		{"C1 PM payload removed", "a\u009eq\u009cb", "ab"},
+		{"C1 APC payload removed", "a\u009fq\u009cb", "ab"},
+		{"unterminated C1 OSC removed to end", "a\u009d0;spoof", "a"},
+		{"C1 DCS not ended by BEL", "a\u0090q\x07b\x1b\\c", "ac"},
+		{"C1 introducer inside an OSC is payload", "a\x1b]\u0090\x1b\\b", "ab"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,6 +97,15 @@ func TestLogLine(t *testing.T) {
 		{"OSC with 9C 9B in a four-byte rune leaks nothing", "a\x1b]0;\U0001C6DBb", "a"},
 		{"PM removed whole", "a\x1b^é\x1b\\b", "ab"},
 		{"SOS removed whole", "a\x1bXé\x1b\\b", "ab"},
+		{"C1 OSC payload removed (BEL)", "a\u009d0;x\x07b", "ab"},
+		{"C1 OSC payload removed (C1 ST)", "a\u009d0;x\u009cb", "ab"},
+		{"C1 DCS payload removed", "a\u0090q\x1b\\b", "ab"},
+		{"C1 SOS payload removed", "a\u0098q\x1b\\b", "ab"},
+		{"C1 PM payload removed", "a\u009eq\u009cb", "ab"},
+		{"C1 APC payload removed", "a\u009fq\u009cb", "ab"},
+		{"unterminated C1 OSC removed to end", "a\u009d0;spoof", "a"},
+		{"C1 DCS not ended by BEL", "a\u0090q\x07b\x1b\\c", "ac"},
+		{"C1 introducer inside an OSC is payload", "a\x1b]\u0090\x1b\\b", "ab"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -224,6 +242,27 @@ func FuzzTextDropsStrings(f *testing.F) {
 			in := "a\x1b" + intro + payload + "\x1b\\b"
 			if got := Text(in); got != "ab" {
 				t.Fatalf("Text(%q) = %q, want %q", in, got, "ab")
+			}
+		}
+	})
+}
+
+// FuzzC1StringsDropped wraps an arbitrary payload in each C1 string
+// introducer and checks that only the text around it survives.
+func FuzzC1StringsDropped(f *testing.F) {
+	f.Add("0;title")
+	f.Add("日本")
+	f.Fuzz(func(t *testing.T, payload string) {
+		if strings.ContainsAny(payload, "\x1b\x07") || strings.Contains(payload, "\u009c") {
+			return
+		}
+		for _, intro := range []string{"\u0090", "\u0098", "\u009d", "\u009e", "\u009f"} {
+			in := "a" + intro + payload + "\u009cb"
+			if got := Text(in); got != "ab" {
+				t.Fatalf("Text(%q) = %q, want %q", in, got, "ab")
+			}
+			if got := LogLine(in); got != "ab" {
+				t.Fatalf("LogLine(%q) = %q, want %q", in, got, "ab")
 			}
 		}
 	})
