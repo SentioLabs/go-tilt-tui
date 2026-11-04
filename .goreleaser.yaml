@@ -1,0 +1,54 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# goreleaser config for go-tilt-tui. release.yml runs it after
+# release-please creates the tag and the GitHub release.
+version: 2
+
+project_name: go-tilt-tui
+
+builds:
+  - id: tilt-tui
+    main: ./cmd/tilt-tui
+    binary: tilt-tui
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/sentiolabs/go-tilt-tui/internal/version.Version=v{{.Version}}
+      - -X github.com/sentiolabs/go-tilt-tui/internal/version.GitCommit={{.Commit}}
+      - -X github.com/sentiolabs/go-tilt-tui/internal/version.BuildDate={{.Date}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    # goreleaser appends .tar.gz. install.sh expects exactly
+    # go-tilt-tui_<version>_<os>_<arch>.tar.gz.
+    name_template: "go-tilt-tui_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# release-please writes CHANGELOG.md and the release notes.
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: SentioLabs
+    name: go-tilt-tui
+  extra_files:
+    - glob: scripts/install.sh
