@@ -12,10 +12,17 @@ set -euo pipefail
 REPO="SentioLabs/go-tilt-tui"
 SIGNER="SentioLabs/go-tilt-tui/.github/workflows/release.yml"
 BASE_URL="${TILT_TUI_BASE_URL:-https://github.com/$REPO}"
-INSTALL_DIR="${TILT_TUI_INSTALL_DIR:-$HOME/.local/bin}"
 
 die()  { echo "install.sh: $*" >&2; exit 1; }
 warn() { echo "install.sh: warning: $*" >&2; }
+
+[ -n "${TILT_TUI_INSTALL_DIR:-}" ] || [ -n "${HOME:-}" ] ||
+  die "HOME is not set. Set TILT_TUI_INSTALL_DIR."
+INSTALL_DIR="${TILT_TUI_INSTALL_DIR:-$HOME/.local/bin}"
+# Trailing slashes would break the PATH check, but a bare / stays.
+while [ "$INSTALL_DIR" != / ] && [ "${INSTALL_DIR%/}" != "$INSTALL_DIR" ]; do
+  INSTALL_DIR="${INSTALL_DIR%/}"
+done
 
 work="$(mktemp -d)"
 staged=""
@@ -101,6 +108,10 @@ main() {
     die "$archive does not hold a regular tilt-tui file"
   fi
 
+  # mv would move the staged file into a directory, so refuse one.
+  [ ! -d "$INSTALL_DIR/tilt-tui" ] ||
+    die "$INSTALL_DIR/tilt-tui is a directory. Remove it or set TILT_TUI_INSTALL_DIR."
+
   # The rename keeps a running old binary intact.
   mkdir -p "$INSTALL_DIR"
   staged="$(mktemp "$INSTALL_DIR/.tilt-tui.XXXXXX")"
@@ -114,7 +125,7 @@ main() {
     *) warn "$INSTALL_DIR is not on PATH. Add it to run tilt-tui by name." ;;
   esac
   found="$(command -v tilt-tui || true)"
-  if [ -n "$found" ] && [ "$found" != "$INSTALL_DIR/tilt-tui" ]; then
+  if [ -n "$found" ] && ! [ "$found" -ef "$INSTALL_DIR/tilt-tui" ]; then
     warn "tilt-tui on PATH is $found, not $INSTALL_DIR/tilt-tui. Remove the old one or put $INSTALL_DIR first."
   fi
 

@@ -50,12 +50,36 @@ good_sums() {
 }
 good_sums
 
-# Restricted tool dir. It holds no gh and no uname.
+# Restricted tool dir. It holds no gh and no uname, and its curl is fake.
 mkdir -p "$root/tools" "$root/fakebin" "$root/ghbin"
-for tool in bash curl tar gzip awk grep mktemp rm mkdir cp chmod mv tr tail cat head dirname env "$sha_tool"; do
+real_curl="$(command -v curl)" || { echo "install_test: missing curl" >&2; exit 1; }
+for tool in bash tar gzip awk grep mktemp rm mkdir cp chmod mv tr tail cat head dirname env "$sha_tool"; do
   path="$(command -v "$tool")" || { echo "install_test: missing $tool" >&2; exit 1; }
   ln -s "$path" "$root/tools/$tool"
 done
+
+# The fake curl answers a -I call for <base>/releases/latest with a redirect
+# to ${FAKE_LATEST_TAG:-v0.1.0}, so no case touches the network. Every
+# other call goes to the real curl.
+cat > "$root/tools/curl" <<EOF
+#!/bin/sh
+head=0
+latest=0
+for arg in "\$@"; do
+  case "\$arg" in
+    -[!-]*I*) head=1 ;;
+    */releases/latest) latest=1 ;;
+  esac
+done
+if [ "\$head" = 1 ] && [ "\$latest" = 1 ]; then
+  printf 'HTTP/1.1 302 Found\r\n'
+  printf 'location: https://example.invalid/SentioLabs/go-tilt-tui/releases/tag/%s\r\n' "\${FAKE_LATEST_TAG:-v0.1.0}"
+  printf '\r\n'
+  exit 0
+fi
+exec "$real_curl" "\$@"
+EOF
+chmod 0755 "$root/tools/curl"
 
 cat > "$root/fakebin/uname" <<'EOF'
 #!/bin/sh
@@ -79,26 +103,44 @@ chmod 0755 "$root/ghbin/gh"
 
 # run <name> <want-exit> [VAR=value ...] runs install.sh in a clean env.
 # NO_GH=1 leaves gh off PATH. OLD_BINARY=1 puts an old tilt-tui in the
-# install dir first. It sets name, dir, rc, out and err for the checks
-# below, and verdict reports the case.
+# install dir first, and DIR_TARGET=1 puts a tilt-tui directory there.
+# SLASH_DIR=1 adds a trailing slash to the install dir and puts the dir
+# on PATH. LATEST=1 leaves TILT_TUI_VERSION unset. NO_HOME=1 leaves both
+# HOME and TILT_TUI_INSTALL_DIR unset. It sets name, dir, rc, out and err
+# for the checks below, and verdict reports the case.
 problems=""
 run() {
+  local vars install_dir on_path latest no_home
   name="$1"; want="$2"; shift 2
   dir="$(mktemp -d "$root/case.XXXXXX")/bin"
   out="$dir.out"; err="$dir.err"
   path="$root/fakebin:$root/ghbin:$root/tools"
+  install_dir="$dir"
+  on_path=0; latest=0; no_home=0
   problems=""
   rm -f "$root/gh.args"
   for kv in "$@"; do
     case "$kv" in
       NO_GH=1) path="$root/fakebin:$root/tools" ;;
       OLD_BINARY=1) mkdir -p "$dir"; echo old > "$dir/tilt-tui" ;;
+      DIR_TARGET=1) mkdir -p "$dir/tilt-tui" ;;
+      SLASH_DIR=1) install_dir="$dir/"; on_path=1 ;;
+      LATEST=1) latest=1 ;;
+      NO_HOME=1) no_home=1 ;;
     esac
   done
+  if [ "$on_path" = 1 ]; then
+    path="$dir:$path"
+  fi
+  vars=("PATH=$path" "TILT_TUI_BASE_URL=file://$root/release")
+  if [ "$no_home" != 1 ]; then
+    vars+=("HOME=$root/home" "TILT_TUI_INSTALL_DIR=$install_dir")
+  fi
+  if [ "$latest" != 1 ]; then
+    vars+=("TILT_TUI_VERSION=$tag")
+  fi
   rc=0
-  env -i HOME="$root/home" PATH="$path" \
-    TILT_TUI_BASE_URL="file://$root/release" TILT_TUI_VERSION="$tag" \
-    TILT_TUI_INSTALL_DIR="$dir" "$@" \
+  env -i "${vars[@]}" "$@" \
     "$(command -v bash)" "$install" > "$out" 2> "$err" || rc=$?
   if [ "$rc" -ne "$want" ]; then
     problems="$problems  exit $rc, want $want"$'\n'
@@ -117,6 +159,10 @@ expect_not_installed() {
 expect_in() {
   grep -qsF -- "$2" "$1" || problem "$(basename "$1") lacks: $2"
 }
+# expect_not_in <file> <text> checks that the file lacks the fixed string.
+expect_not_in() {
+  ! grep -qsF -- "$2" "$1" || problem "$(basename "$1") has: $2"
+}
 expect_no_gh_run() {
   [ ! -e "$root/gh.args" ] || problem "gh ran: $(cat "$root/gh.args")"
 }
@@ -124,9 +170,8 @@ expect_no_gh_run() {
 verdict() {
   local leftover
   if [ -d "$dir" ]; then
-    for leftover in "$dir"/.tilt-tui.*; do
-      [ ! -e "$leftover" ] || problem "temp file left: $leftover"
-    done
+    leftover="$(find "$dir" -name '.tilt-tui.*')"
+    [ -z "$leftover" ] || problem "temp file left: $leftover"
   fi
   if [ -z "$problems" ]; then
     echo "ok   $name"
@@ -201,6 +246,35 @@ verdict
 run "existing binary is replaced" 0 OLD_BINARY=1
 expect_installed
 cmp -s "$dir/tilt-tui" "$root/pkg/tilt-tui" || problem "tilt-tui still has the old content"
+verdict
+
+run "install target is a directory" 1 DIR_TARGET=1
+expect_in "$err" "$dir/tilt-tui is a directory. Remove it or set TILT_TUI_INSTALL_DIR."
+[ -z "$(ls -A "$dir/tilt-tui")" ] || problem "$dir/tilt-tui is not empty: $(ls -A "$dir/tilt-tui")"
+verdict
+
+run "install dir with a trailing slash on PATH" 0 SLASH_DIR=1
+expect_installed
+expect_not_in "$err" "is not on PATH"
+expect_not_in "$err" "tilt-tui on PATH is"
+verdict
+
+run "HOME unset with no install dir" 1 NO_HOME=1
+expect_in "$err" "install.sh: HOME is not set. Set TILT_TUI_INSTALL_DIR."
+[ ! -e "$dir" ] || problem "$dir exists"
+expect_no_gh_run
+verdict
+
+run "latest release" 0 LATEST=1
+expect_installed
+expect_in "$out" "tilt-tui v0.1.0"
+expect_in "$root/gh.args" "attestation verify"
+verdict
+
+run "latest release with a path in its tag" 1 LATEST=1 FAKE_LATEST_TAG='v0.1.0/../../x'
+expect_not_installed
+expect_in "$err" "bad release tag"
+expect_no_gh_run
 verdict
 
 [ "$fails" -eq 0 ] || { echo "$fails case(s) failed" >&2; exit 1; }
