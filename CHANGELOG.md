@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/SentioLabs/go-tilt-tui/compare/v0.1.1...v0.2.0) (2026-11-04)
+
+
+### Features
+
+* **resourcelist:** select the row under a click ([80e7a61](https://github.com/SentioLabs/go-tilt-tui/commit/80e7a61bd031098b62390b4e19e6f8de1db290a6))
+* **ui:** select resources and focus panes by click ([ff42a77](https://github.com/SentioLabs/go-tilt-tui/commit/ff42a772a11bcd9c49e4f1fd2d281b10385fdf3f))
+
 ## [0.1.1](https://github.com/SentioLabs/go-tilt-tui/compare/v0.1.0...v0.1.1) (2026-11-04)
 
 
