@@ -91,7 +91,7 @@ func TestGoneSeesZombie(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer cmd.Wait()
+	defer func() { _ = cmd.Wait() }()
 	if !gone(cmd.Process.Pid) {
 		t.Errorf("gone(zombie pid %d) = false", cmd.Process.Pid)
 	}
@@ -192,7 +192,7 @@ func TestUpFastExitReturnsStderr(t *testing.T) {
 	start := time.Now()
 	c, err := Tilt{Binary: bin}.Up(context.Background(), testPort, nil)
 	if err == nil {
-		c.Stop(time.Second)
+		_ = c.Stop(time.Second)
 		t.Fatal("Up = nil error for a tilt that exits at once")
 	}
 	if c != nil {
@@ -219,11 +219,11 @@ echo $! > "`+pidFile+`"
 exit 3`)
 	c, err := Tilt{Binary: bin}.Up(context.Background(), testPort, nil)
 	if err == nil {
-		c.Stop(time.Second)
+		_ = c.Stop(time.Second)
 		t.Fatal("Up = nil error for a tilt that exits at once")
 	}
 	if grandchild := pidFromFile(t, pidFile); !gone(grandchild) {
-		syscall.Kill(grandchild, syscall.SIGKILL)
+		_ = syscall.Kill(grandchild, syscall.SIGKILL)
 		t.Errorf("grandchild pid %d survived a failed Up", grandchild)
 	}
 }
@@ -367,7 +367,7 @@ func TestDoneClosesWhenTiltExitsLater(t *testing.T) {
 	select {
 	case <-c.Done():
 	case <-time.After(5 * time.Second):
-		c.Stop(time.Second)
+		_ = c.Stop(time.Second)
 		t.Fatal("Done never closed")
 	}
 	var ee *exec.ExitError
@@ -400,11 +400,11 @@ exit 0`)
 	select {
 	case <-c.Done():
 	case <-time.After(5 * time.Second):
-		c.Stop(time.Second)
+		_ = c.Stop(time.Second)
 		t.Fatal("Done never closed")
 	}
 	if !gone(grandchild) {
-		syscall.Kill(grandchild, syscall.SIGKILL)
+		_ = syscall.Kill(grandchild, syscall.SIGKILL)
 		t.Errorf("grandchild pid %d survived tilt's exit", grandchild)
 	}
 	if err := c.Stop(time.Second); err != nil {
@@ -440,7 +440,7 @@ while :; do sleep 0.05; done`)
 		t.Errorf("ExitErr = %v, want nil for a tilt that exited 0", err)
 	}
 	if !gone(grandchild) {
-		syscall.Kill(grandchild, syscall.SIGKILL)
+		_ = syscall.Kill(grandchild, syscall.SIGKILL)
 		t.Errorf("grandchild pid %d survived Stop", grandchild)
 	}
 }
@@ -478,9 +478,13 @@ func TestTailKeepsLast64KiB(t *testing.T) {
 	tl := &tail{max: stderrMax}
 	line := strings.Repeat("x", 1000) + "\n"
 	for range 200 {
-		tl.Write([]byte(line))
+		if _, err := tl.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	tl.Write([]byte("last line\n"))
+	if _, err := tl.Write([]byte("last line\n")); err != nil {
+		t.Fatal(err)
+	}
 	got := tl.String()
 	if len(got) != stderrMax {
 		t.Errorf("len = %d, want %d", len(got), stderrMax)
@@ -505,7 +509,10 @@ func TestTailOneBigWrite(t *testing.T) {
 
 func TestTailDropsSplitRune(t *testing.T) {
 	tl := &tail{max: 4}
-	tl.Write([]byte("aé€")) // a, é (2 bytes), € (3 bytes)
+	// a, é (2 bytes), € (3 bytes)
+	if _, err := tl.Write([]byte("aé€")); err != nil {
+		t.Fatal(err)
+	}
 	// The last 4 bytes start inside é. Its continuation byte is dropped.
 	if got := tl.String(); got != "€" {
 		t.Errorf("String = %q, want %q", got, "€")

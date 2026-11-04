@@ -1,0 +1,15 @@
+version: "2"
+linters:
+  default: standard
+  enable:
+    - depguard
+  settings:
+    depguard:
+      rules:
+        exec-only-in-proc:
+          files:
+            - "$all"
+            - "!**/internal/proc/*.go"
+          deny:
+            - pkg: os/exec
+              desc: only internal/proc may run subprocesses

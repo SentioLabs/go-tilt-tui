@@ -33,7 +33,7 @@ func (f *fakeTilt) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: fakeToken, Path: "/"})
-		io.WriteString(w, "<html></html>")
+		_, _ = io.WriteString(w, "<html></html>")
 	})
 	authed := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +46,7 @@ func (f *fakeTilt) handler() http.Handler {
 		}
 	}
 	mux.HandleFunc("GET /api/websocket_token", authed(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, fakeCSRF)
+		_, _ = io.WriteString(w, fakeCSRF)
 	}))
 	mux.HandleFunc("GET /ws/view", authed(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("csrf") != fakeCSRF {
@@ -58,13 +58,13 @@ func (f *fakeTilt) handler() http.Handler {
 			f.t.Errorf("accept: %v", err)
 			return
 		}
-		defer conn.CloseNow()
+		defer func() { _ = conn.CloseNow() }()
 		for _, m := range f.messages {
 			if err := conn.Write(r.Context(), websocket.MessageText, []byte(m)); err != nil {
 				return
 			}
 		}
-		conn.Close(websocket.StatusNormalClosure, "done")
+		_ = conn.Close(websocket.StatusNormalClosure, "done")
 	}))
 	mux.HandleFunc("POST /api/trigger", authed(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -152,7 +152,7 @@ func TestTriggerSendsManifestName(t *testing.T) {
 
 func TestDoRefusesOversizedBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write(make([]byte, defaultMaxBody+1))
+		_, _ = w.Write(make([]byte, defaultMaxBody+1))
 	}))
 	defer srv.Close()
 	host, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))

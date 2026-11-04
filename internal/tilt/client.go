@@ -145,7 +145,7 @@ func (c *Client) doLimit(ctx context.Context, method, path string, body []byte, 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
@@ -194,7 +194,7 @@ func (c *Client) Watch(ctx context.Context, fn func(View)) error {
 	if err != nil {
 		return fmt.Errorf("connect %s: %w", wsURL.Redacted(), err)
 	}
-	defer conn.CloseNow()
+	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(maxMessageBytes)
 
 	for {

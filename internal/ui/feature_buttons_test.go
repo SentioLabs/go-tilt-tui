@@ -177,7 +177,7 @@ func TestButtonsListsStopBuild(t *testing.T) {
 	if strings.Contains(s, "Disable Resource") {
 		t.Fatalf("the disable toggle is listed:\n%s", s)
 	}
-	m = buttonsPress(m, "enter")
+	buttonsPress(m, "enter")
 	if len(fc.clicks) != 1 || len(fc.clicks[0].values) != 0 {
 		t.Fatalf("clicks = %#v, want one click with no values", fc.clicks)
 	}
@@ -207,7 +207,7 @@ func TestButtonsCancelSendsNothing(t *testing.T) {
 	if s := screen(m); !strings.Contains(s, "Deploy? y/n") {
 		t.Fatalf("no y/n step:\n%s", s)
 	}
-	m = buttonsPress(m, "y")
+	buttonsPress(m, "y")
 	if len(fc.clicks) != 1 || !maps.Equal(fc.clicks[0].values, map[string]any{"force": true}) {
 		t.Fatalf("y gave clicks %#v", fc.clicks)
 	}

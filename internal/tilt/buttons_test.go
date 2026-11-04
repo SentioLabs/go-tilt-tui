@@ -69,13 +69,13 @@ func newButtonFake(t *testing.T) (*buttonFake, *Client) {
 			w.WriteHeader(bf.code)
 		}
 		if bf.reply != "" {
-			io.WriteString(w, bf.reply)
+			_, _ = io.WriteString(w, bf.reply)
 			return
 		}
 		rv, _ := strconv.Atoi(req.body.Metadata.ResourceVersion)
 		out := Button{Metadata: req.body.Metadata, Status: req.body.Status}
 		out.Metadata.ResourceVersion = strconv.Itoa(rv + 1)
-		json.NewEncoder(w).Encode(out)
+		_ = json.NewEncoder(w).Encode(out)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)

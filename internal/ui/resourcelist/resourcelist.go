@@ -150,7 +150,7 @@ func (m *Model) SetResources(rs []tilt.Resource) {
 
 // visible is the filter rule. The pinned resource is exempt from it.
 func (m *Model) visible(r tilt.Resource) bool {
-	return !(m.hideDisabled && r.IsDisabled()) && m.filter.Match(r)
+	return (!m.hideDisabled || !r.IsDisabled()) && m.filter.Match(r)
 }
 
 // pinSelectedIfHidden pins the selected resource or header when an update

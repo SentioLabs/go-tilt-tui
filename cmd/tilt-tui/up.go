@@ -76,7 +76,7 @@ func checkPortFree(host string, port int) error {
 	if err != nil {
 		return nil
 	}
-	conn.Close()
+	_ = conn.Close()
 	return fmt.Errorf("port %d in use; drop --up to attach", port)
 }
 

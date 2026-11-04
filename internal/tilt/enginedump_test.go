@@ -46,7 +46,7 @@ const dumpSmall = `{"ManifestTargets":{
 "Token":"secret","TiltStartTime":"2026-11-03T12:00:00Z"}`
 
 func TestResourceDependencies(t *testing.T) {
-	c := dumpClient(t, func(w io.Writer) { io.WriteString(w, dumpSmall) })
+	c := dumpClient(t, func(w io.Writer) { _, _ = io.WriteString(w, dumpSmall) })
 	got, err := c.ResourceDependencies(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestResourceDependencies(t *testing.T) {
 func TestResourceDependenciesLargeDump(t *testing.T) {
 	pad := strings.Repeat("x", 3<<20)
 	c := dumpClient(t, func(w io.Writer) {
-		io.WriteString(w, `{"LogStore":"`+pad+`",`+strings.TrimPrefix(dumpSmall, "{"))
+		_, _ = io.WriteString(w, `{"LogStore":"`+pad+`",`+strings.TrimPrefix(dumpSmall, "{"))
 	})
 	got, err := c.ResourceDependencies(context.Background())
 	if err != nil || len(got["web"]) != 2 {
@@ -71,14 +71,14 @@ func TestResourceDependenciesLargeDump(t *testing.T) {
 
 func TestResourceDependenciesTooLarge(t *testing.T) {
 	c := dumpClient(t, func(w io.Writer) {
-		io.WriteString(w, `{"LogStore":"`)
+		_, _ = io.WriteString(w, `{"LogStore":"`)
 		chunk := []byte(strings.Repeat("x", 1<<20))
 		for range 65 {
 			if _, err := w.Write(chunk); err != nil {
 				return
 			}
 		}
-		io.WriteString(w, `"}`)
+		_, _ = io.WriteString(w, `"}`)
 	})
 	if _, err := c.ResourceDependencies(context.Background()); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("err = %v, want ErrTooLarge", err)
@@ -87,7 +87,7 @@ func TestResourceDependenciesTooLarge(t *testing.T) {
 
 func TestResourceDependenciesUnknownFormat(t *testing.T) {
 	for _, body := range []string{`{}`, `not json`, `{"ManifestTargets":[1,2]}`, `[]`} {
-		c := dumpClient(t, func(w io.Writer) { io.WriteString(w, body) })
+		c := dumpClient(t, func(w io.Writer) { _, _ = io.WriteString(w, body) })
 		if _, err := c.ResourceDependencies(context.Background()); !errors.Is(err, ErrUnknownFormat) {
 			t.Errorf("%s: err = %v, want ErrUnknownFormat", body, err)
 		}
@@ -96,7 +96,7 @@ func TestResourceDependenciesUnknownFormat(t *testing.T) {
 
 // The error never carries dump content such as Tilt's token.
 func TestResourceDependenciesErrorHidesDump(t *testing.T) {
-	c := dumpClient(t, func(w io.Writer) { io.WriteString(w, `{"Token":"secret-token","ManifestTargets":7}`) })
+	c := dumpClient(t, func(w io.Writer) { _, _ = io.WriteString(w, `{"Token":"secret-token","ManifestTargets":7}`) })
 	_, err := c.ResourceDependencies(context.Background())
 	if err == nil || strings.Contains(err.Error(), "secret-token") {
 		t.Fatalf("err = %v", err)

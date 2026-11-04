@@ -26,7 +26,7 @@ func main() {
 	}
 }
 
-func run(port int, dur time.Duration, out string) error {
+func run(port int, dur time.Duration, out string) (err error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -40,11 +40,17 @@ func run(port int, dur time.Duration, out string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	// Close can report a failed write on some filesystems, so it fails the run.
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), dur)
 	defer cancel()
 	n := 0
+	var writeErr error
 	for ctx.Err() == nil {
 		err := c.Watch(ctx, func(v tilt.View) {
 			b, err := json.Marshal(v)
@@ -55,9 +61,17 @@ func run(port int, dur time.Duration, out string) error {
 			if home != "" {
 				b = bytes.ReplaceAll(b, []byte(home), []byte("/home/user"))
 			}
-			f.Write(append(b, '\n'))
+			if _, err := f.Write(append(b, '\n')); err != nil {
+				// A dropped line corrupts the fixture. Stop recording.
+				writeErr = err
+				cancel()
+				return
+			}
 			n++
 		})
+		if writeErr != nil {
+			return fmt.Errorf("write %s: %w", out, writeErr)
+		}
 		if err != nil && n == 0 {
 			// Tilt isn't up yet. Retry until the deadline.
 			time.Sleep(500 * time.Millisecond)

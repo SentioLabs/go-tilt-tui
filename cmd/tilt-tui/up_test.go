@@ -88,7 +88,7 @@ func TestCheckPortFree(t *testing.T) {
 	if err == nil || err.Error() != want {
 		t.Fatalf("err = %v, want %q", err, want)
 	}
-	l.Close()
+	_ = l.Close()
 	if err := checkPortFree("127.0.0.1", port); err != nil {
 		t.Fatalf("closed port reported in use: %v", err)
 	}
@@ -228,7 +228,7 @@ func newFakeUp(t *testing.T, port int, args []string, results ...any) *fakeUp {
 			return r.(*fakeChild), nil
 		},
 	}
-	t.Cleanup(func() { f.sup.Close() })
+	t.Cleanup(func() { _ = f.sup.Close() })
 	return f
 }
 
@@ -353,7 +353,7 @@ func freePort(t *testing.T) int {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 	return l.Addr().(*net.TCPAddr).Port
 }
 
@@ -399,7 +399,7 @@ func TestUpLeavesNoTiltAfterQuit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-		syscall.Kill(pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
 		t.Fatalf("fake tilt (pid %d) still exists after quit: kill 0 = %v", pid, err)
 	}
 	select {
@@ -521,7 +521,7 @@ func waitPid(t *testing.T, dir string) int {
 				// Without a TERM record this tilt never exited, so the
 				// PID is still its own.
 				if _, err := os.Stat(filepath.Join(dir, "term")); err != nil && syscall.Kill(pid, 0) == nil {
-					syscall.Kill(-pid, syscall.SIGKILL)
+					_ = syscall.Kill(-pid, syscall.SIGKILL)
 				}
 			})
 			return pid
@@ -552,7 +552,7 @@ func waitExit(t *testing.T, p *os.Process, d time.Duration) *os.ProcessState {
 		}
 		return r.st
 	case <-time.After(d):
-		p.Kill()
+		_ = p.Kill()
 		<-done
 		t.Fatalf("tilt-tui still running %v after the signal", d)
 		return nil
@@ -577,12 +577,12 @@ func TestUpSignalDuringStartupStopsTilt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	devNull, err := os.Open(os.DevNull)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer devNull.Close()
+	defer func() { _ = devNull.Close() }()
 	// A new session has no terminal, so tilt-tui can't take over the one
 	// running the tests.
 	p := startTUI(t, dir, freePort(t), []*os.File{devNull, out, out}, &syscall.SysProcAttr{Setsid: true})
@@ -622,7 +622,7 @@ func openPTY(t *testing.T) (master, slave *os.File) {
 	if err != nil {
 		t.Skipf("no pty: %v", err)
 	}
-	t.Cleanup(func() { m.Close() })
+	t.Cleanup(func() { _ = m.Close() })
 	var unlock int32
 	if err := ioctl(m, linuxTIOCSPTLCK, unsafe.Pointer(&unlock)); err != nil {
 		t.Fatalf("unlock pty: %v", err)
@@ -672,18 +672,18 @@ func TestUpHangupQuitsAndStopsTilt(t *testing.T) {
 	copied := make(chan struct{})
 	go func() {
 		defer close(copied)
-		io.Copy(&drawn, master) // ends with EIO once tilt-tui exits
+		_, _ = io.Copy(&drawn, master) // ends with EIO once tilt-tui exits
 	}()
 	p := startTUI(t, dir, freePort(t), []*os.File{slave, slave, slave},
 		&syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0})
-	slave.Close()
+	_ = slave.Close()
 	pid := waitPid(t, dir)
 
 	// The status line shows once launch has returned and the TUI runs.
 	deadline := time.Now().Add(10 * time.Second)
 	for !strings.Contains(drawn.String(), "starting tilt") {
 		if time.Now().After(deadline) {
-			p.Kill()
+			_ = p.Kill()
 			t.Fatalf("the TUI never drew the starting state:\n%q", drawn.String())
 		}
 		time.Sleep(20 * time.Millisecond)
