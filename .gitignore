@@ -1,1 +1,3 @@
 bin/
+dist/
+osv-output*.txt
