@@ -491,7 +491,8 @@ func TestNoTickWhileNothingChanges(t *testing.T) {
 func TestMouseWheelScrollsLogs(t *testing.T) {
 	m, _ := setup(t, 140, 20, Deps{})
 	m.render()
-	m, _ = send(m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	// The notch sits over the log pane: over the list it moves the cursor.
+	m, _ = send(m, tea.MouseWheelMsg{X: 100, Y: 5, Button: tea.MouseWheelUp})
 	if s := screen(m); strings.Contains(s, "[follow]") {
 		t.Fatalf("wheel up did not leave follow mode:\n%s", s)
 	}

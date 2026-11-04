@@ -340,6 +340,10 @@ func (m *Model) ClickRow(i int) bool {
 	return true
 }
 
+// MoveCursor moves the cursor d rows, down for d > 0, and stops at the
+// first and last rows. It's j or k pressed |d| times.
+func (m *Model) MoveCursor(d int) { m.moveTo(m.cursor + d) }
+
 func (m *Model) Selected() logstore.Source { return m.source }
 
 // SelectedResource returns the resource under the cursor, or nil on the

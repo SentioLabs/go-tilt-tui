@@ -104,7 +104,7 @@ tilt-tui --up -- -f Tiltfile
 
 Config lives in `$XDG_CONFIG_HOME/tilt-tui/config.toml`, else `~/.config/tilt-tui/config.toml`. The keys are `theme`, `tiltBinaryPath`, `logFilters` and `logMaxBytesPerResource`, and they match the Bun version. Filter patterns use RE2, which has no lookaround or backreferences.
 
-Click a resource to select it, and click a header twice to collapse or expand its group. A click in a pane gives it focus. While the app reads the mouse, most terminals select text only with Shift held (Option in iTerm2).
+Click a resource to select it, and click a header twice to collapse or expand its group. The wheel over the list moves the selection one row per notch, and over the logs it scrolls them. A click in a pane gives it focus. While the app reads the mouse, most terminals select text only with Shift held (Option in iTerm2).
 
 A local `go build` prints a version like `v0.0.0-<date>-<commit>`, with `+dirty` on a modified tree. Release builds print the tag.
 

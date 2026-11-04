@@ -560,3 +560,20 @@ func TestClickRowMisses(t *testing.T) {
 		}
 	}
 }
+
+func TestMoveCursor(t *testing.T) {
+	m := New(th(t))
+	m.SetResources([]tilt.Resource{res("a"), res("b"), res("c")}) // rows: All, a, b, c
+	m.MoveCursor(-1)
+	if !m.Selected().All {
+		t.Fatalf("up at the top moved: %+v", m.Selected())
+	}
+	m.MoveCursor(2)
+	if m.Selected() != (logstore.Source{Resource: "b"}) {
+		t.Fatalf("down 2: %+v", m.Selected())
+	}
+	m.MoveCursor(5)
+	if m.Selected() != (logstore.Source{Resource: "c"}) {
+		t.Fatalf("down past the end: %+v", m.Selected())
+	}
+}

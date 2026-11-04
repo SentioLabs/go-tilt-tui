@@ -130,3 +130,88 @@ func TestClickNarrowLogPaneDoesNothing(t *testing.T) {
 		t.Fatalf("narrow list click did not select api: %v", r)
 	}
 }
+
+// wheel sends one wheel notch at x, y after drawing a frame.
+func wheel(m Model, x, y int, b tea.MouseButton) Model {
+	_ = screen(m)
+	m, _ = send(m, tea.MouseWheelMsg{X: x, Y: y, Button: b})
+	return m
+}
+
+func TestWheelOverListMovesCursor(t *testing.T) {
+	m := mouseSetup(t, 140, 20)
+	m = wheel(m, 3, 5, tea.MouseWheelDown)
+	m = wheel(m, 3, 5, tea.MouseWheelDown)
+	if r := m.list.SelectedResource(); r == nil || r.Name() != "api" {
+		t.Fatalf("two notches down did not reach api: %v", r)
+	}
+	s := screen(m)
+	if !strings.Contains(s, "api starting") || strings.Contains(s, "web ready") {
+		t.Fatalf("log pane not filtered to api:\n%s", s)
+	}
+	if !strings.Contains(s, "[follow]") {
+		t.Fatalf("wheel over the list scrolled the logs:\n%s", s)
+	}
+	m = wheel(m, 3, 5, tea.MouseWheelUp)
+	if !m.list.OnHeader() {
+		t.Fatal("one notch up did not reach the backend header")
+	}
+	if m.focus != command.FocusList {
+		t.Fatalf("wheel changed focus: %v", m.focus)
+	}
+}
+
+func TestWheelStopsAtEnds(t *testing.T) {
+	m := mouseSetup(t, 140, 20)
+	m = wheel(m, 3, 5, tea.MouseWheelUp)
+	if !m.list.Selected().All {
+		t.Fatalf("up at the top moved: %+v", m.list.Selected())
+	}
+	for range 50 {
+		m = wheel(m, 3, 5, tea.MouseWheelDown)
+	}
+	last := m.list.Selected()
+	m = wheel(m, 3, 5, tea.MouseWheelDown)
+	if m.list.Selected() != last {
+		t.Fatalf("down past the end moved: %+v then %+v", last, m.list.Selected())
+	}
+}
+
+func TestWheelOverLogsScrollsLogs(t *testing.T) {
+	m := mouseSetup(t, 140, 20)
+	m = wheel(m, 100, 5, tea.MouseWheelUp)
+	if !m.list.Selected().All {
+		t.Fatalf("wheel over the logs moved the cursor: %+v", m.list.Selected())
+	}
+	if s := screen(m); strings.Contains(s, "[follow]") {
+		t.Fatalf("wheel up over the logs did not scroll them:\n%s", s)
+	}
+	if m.focus != command.FocusList {
+		t.Fatalf("wheel changed focus: %v", m.focus)
+	}
+}
+
+func TestWheelIgnoredUnderOverlayAndNarrowLogs(t *testing.T) {
+	m := mouseSetup(t, 140, 20)
+	m, _ = send(m, PushOverlayMsg{Overlay: testOverlay{}})
+	m = wheel(m, 3, 5, tea.MouseWheelDown)
+	if !m.list.Selected().All || m.list.OnHeader() {
+		t.Fatalf("wheel under an overlay moved the cursor: %+v", m.list.Selected())
+	}
+
+	m = mouseSetup(t, 80, 20)
+	m = press(m, "enter") // narrow: show the log pane
+	m = wheel(m, 3, 5, tea.MouseWheelDown)
+	if !m.list.Selected().All || m.list.OnHeader() || m.focus != command.FocusLogs {
+		t.Fatalf("wheel on the narrow log pane acted on the list: %+v, focus %v", m.list.Selected(), m.focus)
+	}
+}
+
+func TestWheelOnFooterDoesNothing(t *testing.T) {
+	m := mouseSetup(t, 140, 20)
+	m = wheel(m, 3, 19, tea.MouseWheelDown)
+	// A header keeps the source of the row above, so check OnHeader too.
+	if !m.list.Selected().All || m.list.OnHeader() {
+		t.Fatalf("wheel on the footer moved the cursor: %+v", m.list.Selected())
+	}
+}
