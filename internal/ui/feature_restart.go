@@ -43,7 +43,9 @@ func restartFeature() Feature {
 				ID: "restart", Title: "restart tilt", Keys: []string{"R"}, Scope: command.ScopeGlobal,
 				Run: func(command.Context) tea.Cmd {
 					st.requested = true
-					return tea.Batch(m.flashCmd(restartingText, 0), msgCmd(RestartRequestMsg{}))
+					// Sequence delivers the flash to Update before main sees
+					// the request, so a fast exit can't beat it.
+					return tea.Sequence(m.flashCmd(restartingText, 0), msgCmd(RestartRequestMsg{}))
 				},
 			}}
 		},
@@ -57,9 +59,11 @@ func restartFeature() Feature {
 			case ChildExitedMsg:
 				*st = restartState{exited: true}
 				// A restart that fails fast exits while its flash still shows.
-				// Clear it so the footer shows the R hint again.
+				// Clear it so the footer shows the R hint again. The clear keeps
+				// the flash's stamp so a later flash that arrives after this
+				// exit still wins.
 				if m.flashActive() && m.flash == restartingText {
-					m.setFlash("", m.d.Now(), 0)
+					m.setFlash("", m.flashAt, 0)
 				}
 			}
 			return nil, false
