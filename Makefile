@@ -1,7 +1,7 @@
 # Every target CI runs. Install the tools first with `mise install`.
 VERSION_PKG := github.com/sentiolabs/go-tilt-tui/internal/version
 VERSION     ?= dev
-GO_FILES    := $(shell git ls-files '*.go')
+GO_FILES    := $(wildcard $(shell git ls-files --cached --others --exclude-standard '*.go'))
 
 .PHONY: build test fmt-check tidy-check vet lint vuln pin-check shellcheck actionlint install-test check release-snapshot
 
