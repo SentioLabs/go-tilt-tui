@@ -367,3 +367,50 @@ func TestDownMatchesSingleSteps(t *testing.T) {
 		t.Fatalf("down(1000) stopped at %+v, want line 113 row 0", got)
 	}
 }
+
+// TestDownMatchesSingleStepsUnwrapped checks the same thing on lines that
+// each fit in one row, so no spare rows hide a fetch that is too short.
+func TestDownMatchesSingleStepsUnwrapped(t *testing.T) {
+	var texts []string
+	for i := 1; i <= 200; i++ {
+		texts = append(texts, fmt.Sprintf("line %d", i))
+	}
+	s := logstore.New(logstore.Options{})
+	feed(t, s, true, texts...)
+	newModel := func() *Model {
+		m := New(s, mono(t))
+		m.SetSource(logstore.Source{All: true}, "All Resources")
+		m.View(40, 10, true)
+		m.HandleKey(key("g"))
+		return m
+	}
+	type pos struct {
+		top    logstore.Seq
+		topRow int
+	}
+	for _, tc := range []struct {
+		n    int
+		want pos
+	}{
+		{5, pos{6, 0}},
+		{9, pos{10, 0}},
+		{10, pos{11, 0}},
+		// The last screen holds lines 191 to 200.
+		{1000, pos{191, 0}},
+	} {
+		t.Run(fmt.Sprintf("down(%d)", tc.n), func(t *testing.T) {
+			multi, single := newModel(), newModel()
+			multi.down(tc.n)
+			for range tc.n {
+				single.down(1)
+			}
+			got, exp := pos{multi.top, multi.topRow}, pos{single.top, single.topRow}
+			if got != exp {
+				t.Fatalf("down(%d) at %+v, single steps at %+v", tc.n, got, exp)
+			}
+			if got != tc.want {
+				t.Fatalf("down(%d) at %+v, want %+v", tc.n, got, tc.want)
+			}
+		})
+	}
+}
