@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/sentiolabs/selfupdate-go"
+
+	"github.com/sentiolabs/go-tilt-tui/internal/proc"
 )
 
 // --- Contract assertions ---
@@ -207,6 +209,86 @@ func TestNewWiresTiltTUI(t *testing.T) {
 	}
 }
 
+// stdStreams points os.Stdout and os.Stderr at temp files for the test
+// and returns a func that reads what each one got.
+func stdStreams(t *testing.T) func() (stdout, stderr string) {
+	t.Helper()
+	dir := t.TempDir()
+	open := func(name string) *os.File {
+		f, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = f.Close() })
+		return f
+	}
+	stdout, stderr := open("stdout"), open("stderr")
+	origOut, origErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = stdout, stderr
+	t.Cleanup(func() { os.Stdout, os.Stderr = origOut, origErr })
+	return func() (string, string) {
+		read := func(f *os.File) string {
+			data, err := os.ReadFile(f.Name())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return string(data)
+		}
+		return read(stdout), read(stderr)
+	}
+}
+
+// New treats nil writers as the standard streams, so the hook can write
+// on both its paths.
+func TestNilWritersUseStdStreams(t *testing.T) {
+	for _, tc := range []struct {
+		name, stream, want string
+		setup              func(t *testing.T)
+	}{
+		{"skip", "stderr", "skipping attestation check", func(t *testing.T) {
+			noGH(t)
+			t.Setenv(SkipEnv, "1")
+		}},
+		{"verified", "stdout", "Verified checksums.txt attestation", func(t *testing.T) {
+			fakeGH(t, `exit 0`)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup(t)
+			read := stdStreams(t)
+			srv := fakeGitHub(t)
+			target := writeTarget(t, filepath.Join(t.TempDir(), "tilt-tui"))
+			u := newUpdater(updaterConfig{
+				dir:        t.TempDir(),
+				version:    "v0.4.0",
+				baseURL:    srv.URL,
+				targetPath: target,
+			})
+			if u.Out != os.Stdout || u.ErrOut != os.Stderr || u.In != nil {
+				t.Errorf("Out = %v, ErrOut = %v, In = %v", u.Out, u.ErrOut, u.In)
+			}
+			if inst := u.Installer.(*selfupdate.ArchiveInstaller); inst.Out != os.Stdout {
+				t.Errorf("Installer.Out = %v, want os.Stdout", inst.Out)
+			}
+			if err := u.Update(context.Background(), selfupdate.UpdateOptions{Yes: true}); err != nil {
+				t.Fatalf("Update = %v", err)
+			}
+			data, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != newBinary {
+				t.Errorf("target = %q, want %q", data, newBinary)
+			}
+			stdout, stderr := read()
+			got := map[string]string{"stdout": stdout, "stderr": stderr}[tc.stream]
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("%s lacks %q:\n%s", tc.stream, tc.want, got)
+			}
+		})
+	}
+}
+
 func TestUpdateVerifiedByGH(t *testing.T) {
 	argsFile := filepath.Join(t.TempDir(), "args")
 	fakeGH(t, `printf '%s\n' "$@" > "`+argsFile+`"`)
@@ -261,6 +343,9 @@ func TestUpdateWithoutGH(t *testing.T) {
 	err := h.update(t)
 	if err == nil || !strings.Contains(err.Error(), noGHMessage) {
 		t.Fatalf("Update with no gh = %v, want it to say %q", err, noGHMessage)
+	}
+	if !errors.Is(err, proc.ErrNoGH) {
+		t.Errorf("Update with no gh = %v, want it to wrap proc.ErrNoGH", err)
 	}
 	if got := h.targetBody(t); got != oldBinary {
 		t.Errorf("target = %q, want it unchanged", got)

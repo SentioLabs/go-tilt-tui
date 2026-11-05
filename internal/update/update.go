@@ -39,12 +39,21 @@ type updaterConfig struct {
 }
 
 // New returns the updater for the running tilt-tui. dir is config.Dir().
+// A nil out or errOut means os.Stdout or os.Stderr.
 func New(dir, version string, out, errOut io.Writer, in io.Reader) *selfupdate.Updater {
 	return newUpdater(updaterConfig{dir: dir, version: version, out: out, errOut: errOut, in: in})
 }
 
 // newUpdater builds the updater New returns, with cfg's test overrides.
+// It swaps nil writers for the standard streams once, so the hook and the
+// library write to the same ones.
 func newUpdater(cfg updaterConfig) *selfupdate.Updater {
+	if cfg.out == nil {
+		cfg.out = os.Stdout
+	}
+	if cfg.errOut == nil {
+		cfg.errOut = os.Stderr
+	}
 	return &selfupdate.Updater{
 		Name:    "tilt-tui",
 		Version: cfg.version,
@@ -80,8 +89,8 @@ func verifier(out, errOut io.Writer) func(context.Context, selfupdate.Release, s
 		}
 		err = proc.VerifyAttestation(ctx, abs, Repo, SignerWorkflow)
 		if errors.Is(err, proc.ErrNoGH) {
-			return errors.New("self update verifies the release with gh: " +
-				"install gh and run gh auth login, or set TILT_TUI_INSECURE_SKIP_ATTESTATION=1")
+			return fmt.Errorf("self update verifies the release with gh: "+
+				"install gh and run gh auth login, or set %s=1: %w", SkipEnv, err)
 		}
 		if err != nil {
 			return err
