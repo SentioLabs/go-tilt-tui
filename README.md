@@ -61,9 +61,9 @@ tilt-tui self update
 
 It asks before it replaces the binary. Pass `-y` to skip the prompt, or `--force` to reinstall the current version. `tilt-tui self update --check` prints whether an update exists and installs nothing.
 
-Every update checks the archive's sha256 against the release's `checksums.txt`. Before it trusts that file, it runs `gh attestation verify` on it with the repo and the signer workflow. The install script runs the same check on the archive itself. Both use the release workflow's attestation. It needs `gh` logged in. Set `TILT_TUI_INSECURE_SKIP_ATTESTATION=1` to skip the `gh` step. The sha256 check still runs.
+Every update checks the archive's sha256 against the release's `checksums.txt`. Before it trusts that file, it runs `gh attestation verify` on it with the repo and the signer workflow, and a failed check stops the update. The install script runs the same check on the archive itself. Both use the release workflow's attestation. The `gh` step needs `gh` logged in (`gh auth login`, or set `GH_TOKEN`). Set `TILT_TUI_INSECURE_SKIP_ATTESTATION=1` to skip it. The sha256 check still runs.
 
-`tilt-tui self channel` prints the update channel. `tilt-tui self channel rc` switches to it after a prompt. The channels are `stable`, `rc` and `nightly`. Only stable releases are published today. The channel lives in `selfupdate.toml` in the config directory, next to `config.toml`.
+`tilt-tui self channel` prints the update channel. `tilt-tui self channel rc` switches to `rc` after a prompt. The channels are `stable`, `rc` and `nightly`. Only stable releases are published today. The channel lives in `selfupdate.toml` in the config directory, next to `config.toml`.
 
 `self update` refuses a binary that mise, Homebrew, a system package or Nix installed. It prints the manager's upgrade command instead. For mise that's `mise upgrade github:SentioLabs/go-tilt-tui`.
 
