@@ -458,11 +458,19 @@ func TestWatchSignalsExitsAfterGrace(t *testing.T) {
 
 // A command that returns within grace ends the watcher with no exit.
 func TestWatchSignalsNoExitWhenWorkReturns(t *testing.T) {
-	f := newWatchFixture(t, 100*time.Millisecond)
+	f := newWatchFixture(t, time.Hour)
 	f.sig <- syscall.SIGINT
 	f.waitDone(t)
-	f.stop()
-	time.Sleep(200 * time.Millisecond)
+	stopped := make(chan struct{})
+	go func() {
+		f.stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not end the watcher")
+	}
 	select {
 	case code := <-f.exits:
 		t.Fatalf("exit(%d) called after stop, want none", code)
