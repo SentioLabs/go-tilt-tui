@@ -28,6 +28,13 @@ const (
 	portCheckTimeout = time.Second
 )
 
+// rootCommands follows the flag defaults in -h output.
+const rootCommands = `
+Commands:
+  tilt-tui self update [--check] [-f] [-y]   update tilt-tui to the newest release
+  tilt-tui self channel [stable|rc|nightly]  view or switch the update channel
+`
+
 // options are the parsed command line.
 type options struct {
 	host        string
@@ -49,6 +56,11 @@ func parseFlags(args []string, out io.Writer) (options, error) {
 	var o options
 	fs := flag.NewFlagSet("tilt-tui", flag.ContinueOnError)
 	fs.SetOutput(out)
+	fs.Usage = func() {
+		_, _ = fmt.Fprintf(fs.Output(), "Usage of %s:\n", fs.Name())
+		fs.PrintDefaults()
+		_, _ = fmt.Fprint(fs.Output(), rootCommands)
+	}
 	fs.StringVar(&o.host, "host", tilt.DefaultHost, "Tilt API host")
 	fs.IntVar(&o.port, "port", defaultPort(), "Tilt API port (default from $TILT_PORT, else 10350)")
 	fs.BoolVar(&o.allowRemote, "allow-remote", false, "allow a non-loopback --host; Tilt's tokens then travel unencrypted")

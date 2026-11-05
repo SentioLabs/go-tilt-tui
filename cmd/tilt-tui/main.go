@@ -22,6 +22,7 @@ import (
 	"github.com/sentiolabs/go-tilt-tui/internal/tilt"
 	"github.com/sentiolabs/go-tilt-tui/internal/ui"
 	"github.com/sentiolabs/go-tilt-tui/internal/ui/theme"
+	"github.com/sentiolabs/go-tilt-tui/internal/update"
 	"github.com/sentiolabs/go-tilt-tui/internal/version"
 )
 
@@ -44,6 +45,17 @@ func main() {
 }
 
 func run() error {
+	// parseFlags rejects positional arguments, so `self` goes first.
+	if len(os.Args) > 1 && os.Args[1] == "self" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		dir, err := config.Dir()
+		if err != nil {
+			return err
+		}
+		return runSelf(ctx, update.New(dir, version.Version, os.Stdout, os.Stderr, os.Stdin), os.Args[2:], os.Stdout)
+	}
+
 	opts, err := parseFlags(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return nil

@@ -77,6 +77,18 @@ func TestParseFlags(t *testing.T) {
 	}
 }
 
+func TestParseFlagsUsageListsSelfCommands(t *testing.T) {
+	var out strings.Builder
+	if _, err := parseFlags([]string{"-h"}, &out); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("-h: err = %v, want flag.ErrHelp", err)
+	}
+	for _, want := range []string{"-port", "tilt-tui self update", "tilt-tui self channel"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("-h output %q lacks %q", out.String(), want)
+		}
+	}
+}
+
 func TestCheckPortFree(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

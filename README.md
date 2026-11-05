@@ -51,6 +51,22 @@ Or in a `mise.toml`:
 
 The mise docs say that on public GitHub, mise checks GitHub artifact attestations when a release asset has them. It also checks the digest GitHub reports or a published checksum file, and records the checksum in `mise.lock`. The docs don't say what happens when a release has no attestation. This was checked against the mise 2026.10.19 docs. For the strictest check, use the script path above or [verify by hand](#verify-a-download-by-hand).
 
+## Update
+
+Update to the newest release:
+
+```bash
+tilt-tui self update
+```
+
+It asks before it replaces the binary. Pass `-y` to skip the prompt, or `--force` to reinstall the current version. `tilt-tui self update --check` prints whether an update exists and installs nothing.
+
+Every update checks the archive's sha256 against the release's `checksums.txt`. Before it trusts that file, it runs `gh attestation verify` on it with the repo and the signer workflow. That's the same check the install script runs. It needs `gh` logged in. Set `TILT_TUI_INSECURE_SKIP_ATTESTATION=1` to skip the `gh` step. The sha256 check still runs.
+
+`tilt-tui self channel` prints the update channel. `tilt-tui self channel rc` switches to it after a prompt. The channels are `stable`, `rc` and `nightly`. Only stable releases are published today. The channel lives in `selfupdate.toml` in the config directory, next to `config.toml`.
+
+`self update` refuses a binary that mise, Homebrew, a system package or Nix installed. It prints the manager's upgrade command instead. For mise that's `mise upgrade github:SentioLabs/go-tilt-tui`.
+
 ## Verify a download by hand
 
 Download an archive, `checksums.txt` or `install.sh` from the release page, then run:
