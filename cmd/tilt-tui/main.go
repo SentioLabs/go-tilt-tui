@@ -47,7 +47,7 @@ func main() {
 func run() error {
 	// parseFlags rejects positional arguments, so `self` goes first.
 	if len(os.Args) > 1 && os.Args[1] == "self" {
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		ctx, stop := interruptible(context.Background(), selfGrace, os.Exit, os.Stderr)
 		defer stop()
 		dir, err := config.Dir()
 		if err != nil {

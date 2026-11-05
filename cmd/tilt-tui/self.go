@@ -6,6 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/sentiolabs/selfupdate-go"
 )
@@ -141,4 +145,64 @@ func selfChannel(u *selfupdate.Updater, args []string, out io.Writer) error {
 		return fmt.Errorf("unexpected argument %q: self channel takes at most one channel", fs.Arg(0))
 	}
 	return u.SwitchChannel(selfupdate.Channel(name), yes)
+}
+
+// selfGrace is how long a self command has to return after a signal.
+// selfupdate-go's prompts block on stdin and never watch ctx.
+const selfGrace = time.Second
+
+// interruptible returns a ctx that a SIGINT or SIGTERM cancels. If the
+// command is still running grace after the signal, or a second signal
+// arrives, exit is called with 128 plus the signal number. stop ends the
+// signal watch.
+func interruptible(parent context.Context, grace time.Duration, exit func(int), errOut io.Writer) (context.Context, func()) {
+	sig := make(chan os.Signal, 2)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := watchSignals(parent, sig, grace, exit, errOut)
+	return ctx, func() {
+		signal.Stop(sig)
+		stop()
+	}
+}
+
+// watchSignals is interruptible on a given signal channel. Before exit
+// it writes a newline to errOut, so the shell prompt doesn't land on a
+// [y/N] line. stop waits for the watcher goroutine to end.
+func watchSignals(parent context.Context, sig <-chan os.Signal, grace time.Duration, exit func(int), errOut io.Writer) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(parent)
+	done := make(chan struct{})
+	ended := make(chan struct{})
+	go func() {
+		defer close(ended)
+		var first os.Signal
+		select {
+		case first = <-sig:
+		case <-done:
+			return
+		}
+		cancel()
+		timer := time.NewTimer(grace)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-sig:
+		case <-done:
+			return
+		}
+		_, _ = fmt.Fprintln(errOut)
+		exit(signalExitCode(first))
+	}()
+	return ctx, func() {
+		close(done)
+		<-ended
+		cancel()
+	}
+}
+
+// signalExitCode is the shell's exit status for a process killed by s.
+func signalExitCode(s os.Signal) int {
+	if n, ok := s.(syscall.Signal); ok {
+		return 128 + int(n)
+	}
+	return 130
 }
