@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/SentioLabs/go-tilt-tui/compare/v0.4.0...v0.5.0) (2026-11-05)
+
+
+### Features
+
+* **cli:** add self update and self channel ([38fcdcd](https://github.com/SentioLabs/go-tilt-tui/commit/38fcdcd80309a92c9a848c2e8a5f181e407a5970))
+* **proc:** run gh attestation verify ([b0a7841](https://github.com/SentioLabs/go-tilt-tui/commit/b0a7841f8997c5ff81745d4b8e1755a9c93a3fae))
+* **update:** build the self updater with attested checksums ([16cdcac](https://github.com/SentioLabs/go-tilt-tui/commit/16cdcace13adc75b9f69d538d33ef9c7209bd5d6))
+
+
+### Bug Fixes
+
+* **cli:** deflake signal test and fix attestation docs ([dc06f94](https://github.com/SentioLabs/go-tilt-tui/commit/dc06f942caaf9137c9937a081ba902cef7afe7c7))
+* **cli:** let Ctrl-C stop a self command at its prompt ([4661165](https://github.com/SentioLabs/go-tilt-tui/commit/4661165509976bb5a03e396bd0161aea35423aba))
+* **update:** default nil writers and keep ErrNoGH ([8719046](https://github.com/SentioLabs/go-tilt-tui/commit/871904602be0c58043dd3f82af65068e251f340c))
+
 ## [0.4.0](https://github.com/SentioLabs/go-tilt-tui/compare/v0.3.0...v0.4.0) (2026-11-04)
 
 
